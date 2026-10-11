@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ThermoGuard — TinyML Thermal Monitoring Dashboard</title>
+  <meta name="description" content="Real-time telemetry dashboard for Project ThermoGuard: TinyML thermal profiling of KA7808 regulator via STM32 Nucleo-F401RE." />
+
+  <!-- Tailwind CSS v3 CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] },
+          colors: {
+            brand:   { 50:'#eef7ff', 100:'#d9ecff', 200:'#bce0ff', 400:'#60b8ff', 500:'#38a3ff', 600:'#1a8dff', 700:'#0070e0' },
+            surface: { 800:'#1a1d23', 850:'#14161a', 900:'#0d0f12' },
+            accent:  { cyan:'#22d3ee', lime:'#a3e635', amber:'#fbbf24', rose:'#fb7185' },
+          },
+        },
+      },
+    };
+  </script>
+
+  <!-- Google Fonts: Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+
+  <!-- Chart.js v4 -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+  <!-- chartjs-plugin-zoom for pan/zoom -->
+  <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2/dist/chartjs-plugin-zoom.min.js"></script>
+
+  <style>
+    /* === Custom scrollbar === */
+    ::-webkit-scrollbar { width:6px; height:6px; }
+    ::-webkit-scrollbar-track { background:transparent; }
+    ::-webkit-scrollbar-thumb { background:#334155; border-radius:8px; }
+
+    /* === Glow keyframes === */
+    @keyframes pulse-glow {
+      0%,100% { box-shadow: 0 0 6px 2px rgba(251,113,133,.35); }
+      50%     { box-shadow: 0 0 18px 6px rgba(251,113,133,.65); }
+    }
+    .glow-red { animation: pulse-glow 0.6s ease-in-out infinite; }
+
+    @keyframes pulse-amber {
+      0%,100% { box-shadow: 0 0 6px 2px rgba(251,191,36,.25); }
+      50%     { box-shadow: 0 0 14px 4px rgba(251,191,36,.5); }
+    }
+    .glow-amber { animation: pulse-amber 1.2s ease-in-out infinite; }
+
+    /* === Status dot === */
+    @keyframes blink { 0%,100%{opacity:1;}50%{opacity:.3;} }
+    .dot-blink { animation: blink 1s ease-in-out infinite; }
+
+    /* === Recording badge === */
+    @keyframes rec-pulse {
+      0%,100% { opacity:1; }
+      50%     { opacity:.4; }
+    }
+    .rec-dot { animation: rec-pulse 1s ease-in-out infinite; }
+
+    /* Glass card */
+    .glass {
+      background: rgba(26,29,35,.72);
+      backdrop-filter: blur(16px) saturate(140%);
+      -webkit-backdrop-filter: blur(16px) saturate(140%);
+      border: 1px solid rgba(255,255,255,.06);
+    }
+
+    /* Chart containers */
+    .chart-wrap { position:relative; width:100%; }
+  </style>
+</head>
+
+<body class="bg-surface-900 text-gray-200 font-sans min-h-screen flex flex-col antialiased">
+
+  <!-- ════════════════════════════  TOP BAR  ════════════════════════════ -->
+  <header class="glass sticky top-0 z-50 px-4 py-2.5 flex flex-wrap items-center gap-3 border-b border-white/5 shadow-lg shadow-black/30">
+    <!-- Logo -->
+    <div class="flex items-center gap-2 mr-2 shrink-0">
+      <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center shadow-lg shadow-brand-500/20">
+        <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 2C8 2 6 6 6 10c0 3 1.5 5.5 3 7a7.5 7.5 0 006 0c1.5-1.5 3-4 3-7 0-4-2-8-6-8z"/><path stroke-linecap="round" d="M10 14h4"/></svg>
+      </div>
+      <div>
+        <h1 class="text-sm font-bold tracking-wide leading-none">ThermoGuard</h1>
+        <p class="text-[10px] text-gray-500 leading-none mt-0.5">TinyML Thermal Monitor</p>
+      </div>
+    </div>
+
+    <!-- Port selector -->
+    <div class="flex items-center gap-1.5">
+      <label for="port-select" class="text-xs text-gray-400">Port</label>
+      <select id="port-select" class="bg-surface-850 border border-white/10 rounded-md px-2 py-1 text-xs focus:ring-1 focus:ring-brand-500 outline-none min-w-[160px]">
+        <option value="">— scan ports —</option>
+      </select>
+      <button id="btn-refresh-ports" title="Refresh ports" class="p-1.5 rounded-md hover:bg-white/5 transition-colors">
+        <svg class="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h5M20 20v-5h-5M4 9a9 9 0 0115.6-5.1M20 15a9 9 0 01-15.6 5.1"/></svg>
+      </button>
+    </div>
+
+    <!-- Baud selector -->
+    <div class="flex items-center gap-1.5">
+      <label for="baud-select" class="text-xs text-gray-400">Baud</label>
+      <select id="baud-select" class="bg-surface-850 border border-white/10 rounded-md px-2 py-1 text-xs focus:ring-1 focus:ring-brand-500 outline-none">
+        <option value="9600">9600</option>
+        <option value="19200">19200</option>
+        <option value="38400">38400</option>
+        <option value="57600">57600</option>
+        <option value="115200" selected>115200</option>
+        <option value="230400">230400</option>
+        <option value="460800">460800</option>
+        <option value="921600">921600</option>
+      </select>
+    </div>
+
+    <!-- Connect / Disconnect -->
+    <button id="btn-connect" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200
+      bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-white shadow-lg shadow-emerald-500/20">
+      Connect
+    </button>
+    <button id="btn-disconnect" class="hidden px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200
+      bg-gradient-to-r from-rose-500 to-rose-600 hover:from-rose-400 hover:to-rose-500 text-white shadow-lg shadow-rose-500/20">
+      Disconnect
+    </button>
+
+    <!-- Connection indicator -->
+    <div class="flex items-center gap-1.5">
+      <span id="conn-dot" class="w-2 h-2 rounded-full bg-gray-600 transition-colors"></span>
+      <span id="conn-label" class="text-xs text-gray-500">Offline</span>
+    </div>
+
+    <!-- Spacer -->
+    <div class="flex-1"></div>
+
+    <!-- Recording controls -->
+    <button id="btn-rec-start" class="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200
+      bg-gradient-to-r from-red-500 to-red-600 hover:from-red-400 hover:to-red-500 text-white shadow-lg shadow-red-500/20 disabled:opacity-40 disabled:cursor-not-allowed"
+      disabled>
+      ● REC
+    </button>
+    <button id="btn-rec-stop" class="hidden px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200
+      bg-gradient-to-r from-gray-500 to-gray-600 hover:from-gray-400 hover:to-gray-500 text-white">
+      ■ STOP
+    </button>
+    <div id="rec-badge" class="hidden flex items-center gap-1.5 bg-red-500/15 border border-red-500/30 rounded-full px-3 py-1">
+      <span class="w-2 h-2 rounded-full bg-red-500 rec-dot"></span>
+      <span id="rec-time" class="text-[11px] font-mono text-red-300">00:00</span>
+      <span class="text-gray-500 text-[11px]">|</span>
+      <span id="rec-count" class="text-[11px] font-mono text-red-300">0</span>
+    </div>
+
+    <!-- Export CSV button -->
+    <button id="btn-export-csv" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200
+      bg-surface-850 hover:bg-white/10 text-brand-400 border border-brand-500/30 hover:border-brand-500 shadow-sm"
+      title="Export all session telemetry as CSV (9 values + tracking error + electrical/thermal metrics)">
+      <svg class="w-3.5 h-3.5 text-brand-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+      Export CSV
+    </button>
+  </header>
+
+  <!-- ════════════════════════════  MAIN GRID  ════════════════════════════ -->
+  <main class="flex-1 p-3 grid gap-3
+    grid-cols-1 lg:grid-cols-4 lg:grid-rows-[auto_1fr_1fr]
+    overflow-y-auto">
+
+    <!-- ─── KPI BADGES ROW ─── -->
+    <section class="lg:col-span-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+
+      <!-- KPI: Tracking Error -->
+      <div id="kpi-error" class="glass rounded-xl p-3 flex flex-col gap-0.5 transition-all hover:border-white/10">
+        <span class="text-[10px] uppercase tracking-wider text-gray-500 font-medium">Tracking Error</span>
+        <span id="kpi-error-val" class="text-xl font-bold text-accent-cyan tabular-nums">—</span>
+        <span class="text-[10px] text-gray-500">|T<sub>meas</sub> − T<sub>pred</sub>| °C</span>
+      </div>
+
+      <!-- KPI: MAE -->
+      <div class="glass rounded-xl p-3 flex flex-col gap-0.5 transition-all hover:border-white/10">
+        <span class="text-[10px] uppercase tracking-wider text-gray-500 font-medium">Session MAE</span>
+        <span id="kpi-mae-val" class="text-xl font-bold text-brand-400 tabular-nums">—</span>
+        <span class="text-[10px] text-gray-500">Mean Abs. Error °C</span>
+      </div>
+
+      <!-- KPI: RMSE -->
+      <div class="glass rounded-xl p-3 flex flex-col gap-0.5 transition-all hover:border-white/10">
+        <span class="text-[10px] uppercase tracking-wider text-gray-500 font-medium">Session RMSE</span>
+        <span id="kpi-rmse-val" class="text-xl font-bold text-purple-400 tabular-nums">—</span>
+        <span class="text-[10px] text-gray-500">Root Mean Sq. Error °C</span>
+      </div>
+
+      <!-- KPI: R_θJA -->
+      <div class="glass rounded-xl p-3 flex flex-col gap-0.5 transition-all hover:border-white/10">
+        <span class="text-[10px] uppercase tracking-wider text-gray-500 font-medium">R<sub>θJA</sub></span>
+        <span id="kpi-rtheta-val" class="text-xl font-bold text-accent-amber tabular-nums">—</span>
+        <span class="text-[10px] text-gray-500">°C / W</span>
+      </div>
+
+      <!-- KPI: Thermal Safety -->
+      <div id="kpi-thermal" class="glass rounded-xl p-3 flex flex-col gap-0.5 transition-all hover:border-white/10">
+        <span class="text-[10px] uppercase tracking-wider text-gray-500 font-medium">Heatsink Temp</span>
+        <span id="kpi-temp-val" class="text-xl font-bold text-emerald-400 tabular-nums">—</span>
+        <div class="flex items-center gap-1.5 mt-0.5">
+          <span id="thermal-dot" class="w-2.5 h-2.5 rounded-full bg-emerald-500 transition-colors"></span>
+          <span id="thermal-label" class="text-[10px] font-semibold text-emerald-400">SAFE</span>
+        </div>
+      </div>
+
+      <!-- KPI: MAX31855 Fault -->
+      <div id="kpi-fault" class="glass rounded-xl p-3 flex flex-col gap-0.5 transition-all hover:border-white/10">
+        <span class="text-[10px] uppercase tracking-wider text-gray-500 font-medium">MAX31855</span>
+        <span id="kpi-fault-val" class="text-xl font-bold text-emerald-400 tabular-nums">OK</span>
+        <div id="fault-pills" class="flex flex-wrap gap-1 mt-0.5"></div>
+      </div>
+    </section>
+
+    <!-- ─── THERMAL CHART ─── -->
+    <section class="lg:col-span-3 glass rounded-xl p-4 flex flex-col min-h-[300px]">
+      <div class="flex items-center justify-between mb-2">
+        <div>
+          <h2 class="text-sm font-semibold text-gray-200">Thermal Tracking</h2>
+          <p class="text-[10px] text-gray-500">T<sub>measured</sub> vs T<sub>predicted</sub> (1D CNN INT8) vs T<sub>ambient</sub> — <span id="thermal-window-lbl">120s</span> window</p>
+        </div>
+        <div class="flex items-center gap-1 bg-surface-850 p-1 rounded-lg border border-white/5">
+          <button id="btn-thermal-zoom-in" title="Zoom In (+)" class="w-6 h-6 flex items-center justify-center text-xs font-bold rounded bg-white/5 hover:bg-white/15 text-gray-300 hover:text-white transition-colors">+</button>
+          <button id="btn-thermal-zoom-out" title="Zoom Out (−)" class="w-6 h-6 flex items-center justify-center text-xs font-bold rounded bg-white/5 hover:bg-white/15 text-gray-300 hover:text-white transition-colors">−</button>
+          <span class="w-[1px] h-3.5 bg-white/10 mx-0.5"></span>
+          <button id="btn-reset-thermal-zoom" title="Reset Zoom to 120s" class="text-[10px] px-2 py-0.5 rounded bg-white/5 hover:bg-white/15 text-gray-400 hover:text-gray-200 transition-colors">Reset</button>
+        </div>
+      </div>
+      <div class="chart-wrap flex-1">
+        <canvas id="chart-thermal"></canvas>
+      </div>
+    </section>
+
+    <!-- ─── SAFETY / DIAG PANEL ─── -->
+    <section class="lg:col-span-1 lg:row-span-2 glass rounded-xl p-4 flex flex-col gap-3 overflow-y-auto">
+      <h2 class="text-sm font-semibold text-gray-200 mb-1">Diagnostics</h2>
+
+      <!-- Thermal gauge -->
+      <div class="rounded-lg bg-surface-850 p-3 border border-white/5">
+        <div class="flex items-center justify-between">
+          <span class="text-[10px] uppercase tracking-wider text-gray-500 font-medium">Thermal Zone</span>
+          <span class="text-[9px] font-mono text-gray-400"><span class="text-amber-400">Max 125°C</span> &middot; <span class="text-rose-400 font-medium">Trip 150°C</span></span>
+        </div>
+
+        <!-- Gauge Track and Marker Wrapper -->
+        <div class="relative mt-3 mb-2">
+          <!-- Gradient track (clean gradient, no internal lines) -->
+          <div class="h-3 rounded-full bg-gradient-to-r from-emerald-500 via-amber-400 via-rose-500 to-red-700 relative overflow-hidden border border-white/10 shadow-inner"></div>
+
+          <!-- White Indicator Needle (centered with -translate-x-1/2) -->
+          <div id="thermal-marker" class="absolute -top-1 -bottom-1 w-1.5 bg-white rounded-full shadow-[0_0_10px_rgba(255,255,255,0.95)] -translate-x-1/2 transition-all duration-300 z-20 border border-black/50" style="left: 1%"></div>
+        </div>
+
+        <!-- Clean Labels without text overlap (25°C=0%, 75°C=40%, 125°C=80%, 150°C=100%) -->
+        <div class="relative h-3.5 mt-1 text-[9px] font-mono select-none">
+          <span class="absolute left-0 text-gray-400">25°C</span>
+          <span class="absolute -translate-x-1/2 text-gray-400" style="left: 40%">75°C</span>
+          <span class="absolute -translate-x-1/2 text-amber-400 font-semibold" style="left: 80%">125°C</span>
+          <span class="absolute right-0 text-rose-400 font-bold">150°C</span>
+        </div>
+      </div>
+
+      <!-- Live values table -->
+      <div class="rounded-lg bg-surface-850 p-3 border border-white/5">
+        <span class="text-[10px] uppercase tracking-wider text-gray-500">Live Readings</span>
+        <table class="w-full mt-2 text-xs">
+          <tbody class="divide-y divide-white/5">
+            <tr><td class="py-1 text-gray-400">V<sub>in</sub></td><td id="live-vin" class="py-1 text-right font-mono tabular-nums">—</td></tr>
+            <tr><td class="py-1 text-gray-400">V<sub>out</sub></td><td id="live-vout" class="py-1 text-right font-mono tabular-nums">—</td></tr>
+            <tr><td class="py-1 text-gray-400">V<sub>drop</sub></td><td id="live-vdrop" class="py-1 text-right font-mono tabular-nums">—</td></tr>
+            <tr><td class="py-1 text-gray-400">I<sub>load</sub></td><td id="live-iload" class="py-1 text-right font-mono tabular-nums">—</td></tr>
+            <tr><td class="py-1 text-gray-400">P<sub>diss</sub></td><td id="live-pdiss" class="py-1 text-right font-mono tabular-nums">—</td></tr>
+            <tr><td class="py-1 text-gray-400">T<sub>ambient</sub></td><td id="live-tamb" class="py-1 text-right font-mono tabular-nums">—</td></tr>
+            <tr><td class="py-1 text-gray-400">T<sub>measured</sub></td><td id="live-tmeas" class="py-1 text-right font-mono tabular-nums">—</td></tr>
+            <tr><td class="py-1 text-gray-400">T<sub>predicted</sub></td><td id="live-tpred" class="py-1 text-right font-mono tabular-nums">—</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Fault decode -->
+      <div class="rounded-lg bg-surface-850 p-3 border border-white/5">
+        <span class="text-[10px] uppercase tracking-wider text-gray-500">MAX31855 Faults</span>
+        <div id="diag-fault-detail" class="mt-2 space-y-1.5">
+          <div class="flex items-center gap-2">
+            <span id="diag-f0" class="w-2 h-2 rounded-full bg-gray-600"></span>
+            <span class="text-xs text-gray-400">Bit 0 — General Fault</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span id="diag-f1" class="w-2 h-2 rounded-full bg-gray-600"></span>
+            <span class="text-xs text-gray-400">Bit 1 — Short to GND (SCG)</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span id="diag-f2" class="w-2 h-2 rounded-full bg-gray-600"></span>
+            <span class="text-xs text-gray-400">Bit 2 — Short to VCC (SCV)</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span id="diag-f3" class="w-2 h-2 rounded-full bg-gray-600"></span>
+            <span class="text-xs text-gray-400">Bit 3 — Open Circuit (OC)</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Session info -->
+      <div class="rounded-lg bg-surface-850 p-3 border border-white/5">
+        <span class="text-[10px] uppercase tracking-wider text-gray-500">Session</span>
+        <div class="mt-2 text-xs space-y-1">
+          <div class="flex justify-between"><span class="text-gray-400">Frames</span><span id="stat-frames" class="font-mono tabular-nums">0</span></div>
+          <div class="flex justify-between"><span class="text-gray-400">Malformed</span><span id="stat-malformed" class="font-mono tabular-nums text-rose-400">0</span></div>
+          <div class="flex justify-between"><span class="text-gray-400">Uptime</span><span id="stat-uptime" class="font-mono tabular-nums">—</span></div>
+        </div>
+      </div>
+
+      <!-- Model info -->
+      <div class="rounded-lg bg-surface-850 p-3 border border-white/5">
+        <span class="text-[10px] uppercase tracking-wider text-gray-500">CNN Model</span>
+        <div class="mt-2 text-xs space-y-1 text-gray-400">
+          <div>Arch: <span class="text-gray-200">1D CNN (INT8)</span></div>
+          <div>Array: <span class="text-gray-200 font-mono">cnn_thermal_model</span></div>
+          <div>Size: <span class="text-gray-200">11,504 bytes</span></div>
+          <div>MCU: <span class="text-gray-200">STM32F401RE</span></div>
+          <div>Board: <span class="text-gray-200">Nucleo-F401RE</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── ELECTRICAL CHART ─── -->
+    <section class="lg:col-span-3 glass rounded-xl p-4 flex flex-col min-h-[260px]">
+      <div class="flex items-center justify-between mb-2">
+        <div>
+          <h2 class="text-sm font-semibold text-gray-200">Electrical Metrics</h2>
+          <p class="text-[10px] text-gray-500">V<sub>drop</sub>, I<sub>load</sub>, P<sub>diss</sub> — <span id="elec-window-lbl">120s</span> window</p>
+        </div>
+        <div class="flex items-center gap-1 bg-surface-850 p-1 rounded-lg border border-white/5">
+          <button id="btn-elec-zoom-in" title="Zoom In (+)" class="w-6 h-6 flex items-center justify-center text-xs font-bold rounded bg-white/5 hover:bg-white/15 text-gray-300 hover:text-white transition-colors">+</button>
+          <button id="btn-elec-zoom-out" title="Zoom Out (−)" class="w-6 h-6 flex items-center justify-center text-xs font-bold rounded bg-white/5 hover:bg-white/15 text-gray-300 hover:text-white transition-colors">−</button>
+          <span class="w-[1px] h-3.5 bg-white/10 mx-0.5"></span>
+          <button id="btn-reset-elec-zoom" title="Reset Zoom to 120s" class="text-[10px] px-2 py-0.5 rounded bg-white/5 hover:bg-white/15 text-gray-400 hover:text-gray-200 transition-colors">Reset</button>
+        </div>
+      </div>
+      <div class="chart-wrap flex-1">
+        <canvas id="chart-electrical"></canvas>
+      </div>
+    </section>
+  </main>
+
+  <!-- ════════════════════════════  FOOTER  ════════════════════════════ -->
+  <footer class="text-center text-[10px] text-gray-600 py-2 border-t border-white/5">
+    Project ThermoGuard &middot; KA7808 Thermal Profiling &middot; STM32 Nucleo-F401RE &middot; INT8 1D CNN
+  </footer>
+
+  <!-- Audible alert (70°C+) -->
+  <audio id="alarm-audio" preload="auto">
+    <!-- A short beep generated by oscillator in JS; no external file needed -->
+  </audio>
+
+  <!-- App JS -->
+  <script src="/static/app.js"></script>
+</body>
+</html>
