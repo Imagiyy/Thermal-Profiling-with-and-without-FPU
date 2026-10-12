@@ -179,9 +179,8 @@ def parse_frame(raw_line: str) -> dict | None:
     except (ValueError, IndexError):
         return None
 
-    # Software Rule: Zero-voltage noise clamp
-    # If Vin < 0.1 V (unpowered or floating terminals), clamp current and dissipation to 0
-    if v_in < 0.1:
+    # Software Rule: Vin threshold (< 1.0 V -> clamp current, power, and drop to 0)
+    if v_in < 1.0:
         i_ma = 0.0
         p_mw = 0.0
         v_drop = 0.0

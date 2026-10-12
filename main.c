@@ -368,7 +368,11 @@ static int ina219_read(int32_t *vbus_mV, int32_t *i_cmA)
         return -1;
     }
     *vbus_mV = (int32_t)(bus >> 3) * 4;
-    *i_cmA   = ((int32_t)(int16_t)shunt * 1000) / (int32_t)SHUNT_MOHM;
+    if (*vbus_mV < 1000) {
+        *i_cmA = 0; /* Vin < 1.0 V threshold: clamp current to 0 */
+    } else {
+        *i_cmA = ((int32_t)(int16_t)shunt * 1000) / (int32_t)SHUNT_MOHM;
+    }
     return 0;
 }
 
@@ -582,9 +586,8 @@ int main(void)
             else if (r < 0)   { hs_cC = 0; fault |= F_MAX_COMM; }
         }
 
-        /* Software Rule: Zero-voltage noise clamp
-         * If Vin < 100 mV (unpowered/floating terminals), current and power dissipation must be 0 */
-        if (vin_mV < 100) {
+        /* Threshold Rule: If Vin < 1000 mV (1.0 V), current and power dissipation must be 0 */
+        if (vin_mV < 1000) {
             i_cmA = 0;
             ploss_cmW = 0;
         } else if (!(fault & (F_INA219 | F_ADC))) {
