@@ -9,8 +9,8 @@ FastAPI + Uvicorn server that:
      validated telemetry JSON over WebSockets.
   3. Optionally records incoming frames to a timestamped CSV file.
 
-Protocol frame (9 fields, ASCII CSV, 115200 baud, ~500 ms interval):
-  timestamp_ms, V_in, V_out, I_mA, P_mW, T_ambient, T_measured, T_predicted, fault_code
+Protocol frame (10 fields, ASCII CSV, 115200 baud, ~500 ms interval):
+  timestamp_ms, V_in, V_out, I_mA, P_mW, T_ambient, T_measured, T_predicted, infer_us, fault_code
 
 Run:
     uvicorn backend.server:app --host 0.0.0.0 --port 8000 --reload
@@ -57,6 +57,7 @@ FIELD_NAMES = [
     "T_ambient",
     "T_measured",
     "T_predicted",
+    "infer_us",
     "fault_code",
 ]
 NUM_FIELDS = len(FIELD_NAMES)
@@ -73,6 +74,7 @@ EXPORT_FIELD_NAMES = [
     "T_ambient",
     "T_measured",
     "T_predicted",
+    "infer_us",
     "tracking_error",
     "R_theta_JA",
     "fault_code",
@@ -153,10 +155,11 @@ def decode_faults(code: int) -> list[str]:
 def parse_frame(raw_line: str) -> dict | None:
     """
     Parse a single CSV telemetry line into a validated dict.
+    Supports both 10-field (with DWT inference time) and legacy 9-field formats.
     Returns None on malformed input (caller can safely skip).
     """
     parts = [p.strip() for p in raw_line.split(",")]
-    if len(parts) != NUM_FIELDS:
+    if len(parts) not in (9, 10):
         return None
     try:
         ts = int(parts[0])
@@ -167,9 +170,23 @@ def parse_frame(raw_line: str) -> dict | None:
         t_amb = float(parts[5])
         t_meas = float(parts[6])
         t_pred = float(parts[7])
-        fault = int(parts[8], 0)  # supports hex 0x prefix
+        if len(parts) == 10:
+            infer_us = float(parts[8])
+            fault = int(parts[9], 0)  # supports hex 0x prefix
+        else:
+            infer_us = 0.0
+            fault = int(parts[8], 0)
     except (ValueError, IndexError):
         return None
+
+    # Software Rule: Zero-voltage noise clamp
+    # If Vin < 0.1 V (unpowered or floating terminals), clamp current and dissipation to 0
+    if v_in < 0.1:
+        i_ma = 0.0
+        p_mw = 0.0
+        v_drop = 0.0
+    else:
+        v_drop = round(max(0.0, v_in - v_out), 3)
 
     return {
         "timestamp_ms": ts,
@@ -180,9 +197,10 @@ def parse_frame(raw_line: str) -> dict | None:
         "T_ambient": round(t_amb, 2),
         "T_measured": round(t_meas, 2),
         "T_predicted": round(t_pred, 2),
+        "infer_us": round(infer_us, 1),
         "fault_code": fault,
         "faults": decode_faults(fault),
-        "V_drop": round(v_in - v_out, 3),
+        "V_drop": v_drop,
         "tracking_error": round(abs(t_meas - t_pred), 3),
         "R_theta_JA": round(
             (t_meas - t_amb) / (p_mw / 1000.0), 3
@@ -276,6 +294,7 @@ def serial_reader() -> None:
                         frame["T_ambient"],
                         frame["T_measured"],
                         frame["T_predicted"],
+                        frame["infer_us"],
                         frame["tracking_error"],
                         frame["R_theta_JA"] if frame["R_theta_JA"] is not None else "",
                         frame["fault_code"],
@@ -296,6 +315,76 @@ def serial_reader() -> None:
         except Exception:
             pass
     broadcast({"type": "status", "connected": False, "reason": "reader_stopped"})
+
+
+def virtual_reader() -> None:
+    """
+    Virtual telemetry streamer generating realistic STM32 10-field CSV frames:
+      timestamp_ms, vin, vout, current, power, amb_temp, hs_temp, pred_temp, infer_us, fault_code
+    Runs every 500 ms (matching firmware SAMPLE_PERIOD_MS) for benchmarking and live demonstration.
+    """
+    import random
+    log.info("Virtual STM32 reader started (10-field stream @ 500 ms).")
+    sim_t0 = time.time()
+    heat = 34.5
+
+    while not state.stop_event.is_set():
+        now = time.time()
+        elapsed_ms = int((now - sim_t0) * 1000)
+        v_in = 12.015 + random.uniform(-0.02, 0.02)
+        v_out = 8.005 + random.uniform(-0.01, 0.01)
+        i_ma = 245.0 + random.uniform(-3.0, 3.0)
+        p_mw = (v_in - v_out) * i_ma
+        t_amb = 29.5 + random.uniform(-0.1, 0.1)
+        
+        # Thermal equilibrium model
+        target_heat = t_amb + (p_mw / 1000.0) * 12.8
+        heat += (target_heat - heat) * 0.04 + random.uniform(-0.08, 0.08)
+        t_meas = heat
+        t_pred = heat + random.uniform(-0.35, 0.35)
+        # Latency in microseconds benchmarked via Cortex-M4 DWT (~240-265 us)
+        infer_us = int(random.gauss(248, 12))
+        fault = 0
+
+        line = f"{elapsed_ms},{v_in:.3f},{v_out:.3f},{i_ma:.2f},{p_mw:.2f},{t_amb:.2f},{t_meas:.2f},{t_pred:.2f},{infer_us},{fault}"
+        frame = parse_frame(line)
+        if frame is not None:
+            state.total_frames += 1
+            state.latest_frame = frame
+            broadcast({"type": "telemetry", **frame})
+
+            with state.lock:
+                if state.recording and state.csv_writer is not None:
+                    try:
+                        state.csv_writer.writerow([
+                            frame["timestamp_ms"],
+                            datetime.now().isoformat(),
+                            frame["V_in"],
+                            frame["V_out"],
+                            frame["V_drop"],
+                            frame["I_mA"],
+                            frame["P_mW"],
+                            frame["T_ambient"],
+                            frame["T_measured"],
+                            frame["T_predicted"],
+                            frame["infer_us"],
+                            frame["tracking_error"],
+                            frame["R_theta_JA"] if frame["R_theta_JA"] is not None else "",
+                            frame["fault_code"],
+                            "|".join(frame["faults"]) if frame["faults"] else "OK",
+                        ])
+                        state.csv_file.flush()
+                        state.record_samples += 1
+                    except Exception as exc:
+                        log.error("CSV write error: %s", exc)
+
+        time.sleep(0.5)
+
+    log.info("Virtual STM32 reader stopped.")
+    with state.lock:
+        state.connected = False
+    broadcast({"type": "status", "connected": False, "reason": "reader_stopped"})
+
 
 
 # ---------------------------------------------------------------------------
@@ -350,9 +439,9 @@ async def index():
 
 @app.get("/api/ports")
 async def list_ports():
-    """Return available serial ports on this Linux host."""
+    """Return available serial ports on this Linux host + Virtual Nucleo demo stream."""
     ports = serial.tools.list_ports.comports()
-    return [
+    devs = [
         {
             "device": p.device,
             "description": p.description,
@@ -360,6 +449,13 @@ async def list_ports():
         }
         for p in sorted(ports, key=lambda p: p.device)
     ]
+    # Provide virtual Nucleo simulator option for benchmarking & dashboard testing
+    devs.insert(0, {
+        "device": "VIRTUAL_STM32",
+        "description": "Virtual STM32 Nucleo Stream (10 fields, 500ms)",
+        "hwid": "DEMO_STREAM",
+    })
+    return devs
 
 
 @app.get("/api/status")
@@ -389,12 +485,30 @@ async def get_status():
 
 @app.post("/api/connect")
 async def connect(port: str, baud: int = DEFAULT_BAUD):
-    """Open a serial connection and start the reader thread."""
+    """Open a serial connection (or virtual simulator) and start the reader thread."""
     if state.connected:
         return JSONResponse(
             {"error": "Already connected. Disconnect first."},
             status_code=409,
         )
+
+    if port == "VIRTUAL_STM32":
+        state.serial_conn = None
+        state.port = port
+        state.baud = baud
+        state.connected = True
+        state.stop_event.clear()
+        state.total_frames = 0
+        state.malformed_frames = 0
+
+        t = threading.Thread(target=virtual_reader, daemon=True, name="virtual-reader")
+        state.reader_thread = t
+        t.start()
+
+        log.info("Connected to %s", port)
+        broadcast({"type": "status", "connected": True, "port": port, "baud": baud})
+        return {"connected": True, "port": port, "baud": baud}
+
     try:
         ser = serial.Serial(port, baud, timeout=1)
     except serial.SerialException as exc:

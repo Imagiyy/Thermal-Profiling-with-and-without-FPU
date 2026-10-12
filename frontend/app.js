@@ -43,35 +43,37 @@ const btnDisconnect= $("btn-disconnect");
 const connDot      = $("conn-dot");
 const connLabel    = $("conn-label");
 
-const btnRecStart  = $("btn-rec-start");
-const btnRecStop   = $("btn-rec-stop");
+const btnResetPage = $("btn-reset-page");
 const btnExportCsv = $("btn-export-csv");
-const recBadge     = $("rec-badge");
-const recTime      = $("rec-time");
-const recCount     = $("rec-count");
 
 const kpiErrorVal  = $("kpi-error-val");
 const kpiMaeVal    = $("kpi-mae-val");
 const kpiRmseVal   = $("kpi-rmse-val");
+const kpiPredTempVal= $("kpi-pred-temp-val");
 const kpiRthetaVal = $("kpi-rtheta-val");
 const kpiTempVal   = $("kpi-temp-val");
-const kpiFaultVal  = $("kpi-fault-val");
-const thermalDot   = $("thermal-dot");
-const thermalLabel = $("thermal-label");
-const thermalMarker= $("thermal-marker");
-const faultPills   = $("fault-pills");
-const kpiThermal   = $("kpi-thermal");
-const kpiFault     = $("kpi-fault");
+const kpiPredTimeVal    = $("kpi-pred-time-val");
+const kpiPredTimeSub    = $("kpi-pred-time-sub");
+const kpiAvgPredTimeVal = $("kpi-avg-pred-time-val");
+const kpiAvgPredTimeSub = $("kpi-avg-pred-time-sub");
+const thermalDot        = $("thermal-dot");
+const thermalLabel      = $("thermal-label");
+const thermalMarker     = $("thermal-marker");
+const kpiThermal        = $("kpi-thermal");
 
 // Live readings
-const liveVin   = $("live-vin");
-const liveVout  = $("live-vout");
-const liveVdrop = $("live-vdrop");
-const liveIload = $("live-iload");
-const livePdiss = $("live-pdiss");
-const liveTamb  = $("live-tamb");
-const liveTmeas = $("live-tmeas");
-const liveTpred = $("live-tpred");
+const liveVin        = $("live-vin");
+const liveVout       = $("live-vout");
+const liveVdrop      = $("live-vdrop");
+const liveIload      = $("live-iload");
+const livePdiss      = $("live-pdiss");
+const liveTamb       = $("live-tamb");
+const liveTmeas      = $("live-tmeas");
+const liveTpred      = $("live-tpred");
+const liveLatency    = $("live-latency");
+const liveAvgLatency = $("live-avg-latency");
+const modelLatency   = $("model-latency");
+const modelAvgLatency= $("model-avg-latency");
 
 const statFrames    = $("stat-frames");
 const statMalformed = $("stat-malformed");
@@ -83,8 +85,6 @@ const statUptime    = $("stat-uptime");
 let ws = null;
 let isConnected = false;
 let sessionStart = null;
-let recStartTime = null;
-let recTimerHandle = null;
 
 // Error accumulation for MAE / RMSE
 let errorSum   = 0;
@@ -92,6 +92,10 @@ let errorSqSum = 0;
 let errorCount = 0;
 let frameCount = 0;
 let malformedCount = 0;
+
+// Inference latency accumulation (DWT benchmarking)
+let latencySum   = 0;
+let latencyCount = 0;
 
 // Complete session telemetry buffer for CSV export (all 9 raw values + derived metrics)
 const sessionTelemetryLog = [];
@@ -452,7 +456,7 @@ function handleTelemetry(d) {
   elecChart.data.datasets[1].data.push({ x: ts, y: d.I_mA });
   elecChart.data.datasets[2].data.push({ x: ts, y: d.P_mW });
 
-  // ── Record frame into session export log (all 9 raw values + error + metrics) ──
+  // ── Record frame into session export log (all raw values + infer_us + derived metrics) ──
   sessionTelemetryLog.push({
     timestamp_ms: d.timestamp_ms,
     iso_time: new Date().toISOString(),
@@ -464,6 +468,7 @@ function handleTelemetry(d) {
     T_ambient: d.T_ambient,
     T_measured: d.T_measured,
     T_predicted: d.T_predicted,
+    infer_us: d.infer_us !== undefined ? d.infer_us : 0,
     tracking_error: d.tracking_error,
     R_theta_JA: d.R_theta_JA !== null ? d.R_theta_JA : "",
     fault_code: d.fault_code,
@@ -497,15 +502,45 @@ function handleTelemetry(d) {
   kpiMaeVal.textContent  = (errorSum / errorCount).toFixed(3);
   kpiRmseVal.textContent = Math.sqrt(errorSqSum / errorCount).toFixed(3);
 
-  // ── KPI: RθJA ──
-  kpiRthetaVal.textContent = d.R_theta_JA != null ? d.R_theta_JA.toFixed(2) : "—";
+  // ── KPI: Predicted Temperature ──
+  if (kpiPredTempVal) {
+    kpiPredTempVal.textContent = d.T_predicted.toFixed(2) + " °C";
+  }
+  if (kpiRthetaVal) {
+    kpiRthetaVal.textContent = d.R_theta_JA != null ? d.R_theta_JA.toFixed(2) : "—";
+  }
 
   // ── KPI: Heatsink temperature + safety zone ──
   const t = d.T_measured;
   kpiTempVal.textContent = t.toFixed(1) + " °C";
   updateThermalZone(t);
 
-  // ── KPI: MAX31855 fault decode ──
+  // ── KPI: Prediction Time & Average Prediction Time ──
+  const inferUs = (d.infer_us !== undefined && d.infer_us !== null) ? Number(d.infer_us) : 0;
+  if (inferUs > 0) {
+    latencySum += inferUs;
+    latencyCount++;
+    const avgUs = latencySum / latencyCount;
+
+    const fmtLatency = (val) => (val >= 1000 ? `${(val / 1000).toFixed(2)} ms` : `${Math.round(val)} µs`);
+
+    if (kpiPredTimeVal) kpiPredTimeVal.textContent = fmtLatency(inferUs);
+    if (kpiPredTimeSub) {
+      kpiPredTimeSub.textContent = inferUs >= 1000
+        ? `${Math.round(inferUs).toLocaleString()} µs · DWT`
+        : `${(inferUs / 1000).toFixed(3)} ms · DWT`;
+    }
+
+    if (kpiAvgPredTimeVal) kpiAvgPredTimeVal.textContent = fmtLatency(avgUs);
+    if (kpiAvgPredTimeSub) kpiAvgPredTimeSub.textContent = `Mean (${latencyCount} runs)`;
+
+    if (liveLatency) liveLatency.textContent = fmtLatency(inferUs);
+    if (liveAvgLatency) liveAvgLatency.textContent = fmtLatency(avgUs);
+    if (modelLatency) modelLatency.textContent = fmtLatency(inferUs);
+    if (modelAvgLatency) modelAvgLatency.textContent = fmtLatency(avgUs);
+  }
+
+  // ── MAX31855 fault decode (sidebar indicators) ──
   updateFaults(d.fault_code, d.faults);
 
   // ── Live readings ──
@@ -604,26 +639,14 @@ const FAULT_NAMES = ["FAULT", "SCG", "SCV", "OC"];
 const DIAG_DOTS   = [$("diag-f0"), $("diag-f1"), $("diag-f2"), $("diag-f3")];
 
 function updateFaults(code, faultList) {
-  if (code === 0) {
-    kpiFaultVal.textContent = "OK";
-    kpiFaultVal.className = "text-xl font-bold text-emerald-400 tabular-nums";
-    kpiFault.classList.remove("glow-red");
-    faultPills.innerHTML = "";
-  } else {
-    kpiFaultVal.textContent = "FAULT";
-    kpiFaultVal.className = "text-xl font-bold text-rose-400 tabular-nums";
-    kpiFault.classList.add("glow-red");
-    faultPills.innerHTML = faultList
-      .map((f) => `<span class="text-[9px] px-1.5 py-0.5 rounded-full bg-rose-500/20 text-rose-300 font-semibold">${f}</span>`)
-      .join("");
-  }
-
-  // Diagnostic indicator dots
+  // Diagnostic indicator dots in sidebar
   for (let i = 0; i < 4; i++) {
-    if (code & (1 << i)) {
-      DIAG_DOTS[i].className = "w-2 h-2 rounded-full bg-rose-500 dot-blink";
-    } else {
-      DIAG_DOTS[i].className = "w-2 h-2 rounded-full bg-gray-600";
+    if (DIAG_DOTS[i]) {
+      if (code & (1 << i)) {
+        DIAG_DOTS[i].className = "w-2 h-2 rounded-full bg-rose-500 dot-blink";
+      } else {
+        DIAG_DOTS[i].className = "w-2 h-2 rounded-full bg-gray-600";
+      }
     }
   }
 }
@@ -682,7 +705,6 @@ function setConnectionUI(connected) {
     connLabel.className    = "text-xs text-emerald-400";
     btnConnect.classList.add("hidden");
     btnDisconnect.classList.remove("hidden");
-    btnRecStart.disabled   = false;
     sessionStart = sessionStart || Date.now();
   } else {
     connDot.className      = "w-2 h-2 rounded-full bg-gray-600";
@@ -690,7 +712,6 @@ function setConnectionUI(connected) {
     connLabel.className    = "text-xs text-gray-500";
     btnConnect.classList.remove("hidden");
     btnDisconnect.classList.add("hidden");
-    btnRecStart.disabled   = true;
     stopAlarm();
     sessionStart = null;
   }
@@ -730,6 +751,7 @@ async function doConnect() {
       setConnectionUI(true);
       // Reset session metrics
       errorSum = errorSqSum = errorCount = frameCount = malformedCount = 0;
+      latencySum = latencyCount = 0;
     } else {
       alert(data.error || "Connection failed");
     }
@@ -742,47 +764,12 @@ async function doDisconnect() {
   try {
     await fetch(`${API}/disconnect`, { method: "POST" });
     setConnectionUI(false);
-    stopRecordingUI();
   } catch (e) {
     console.error("Disconnect error:", e);
   }
 }
 
-async function doStartRecording() {
-  try {
-    const res = await fetch(`${API}/record/start`, { method: "POST" });
-    const data = await res.json();
-    if (res.ok) {
-      btnRecStart.classList.add("hidden");
-      btnRecStop.classList.remove("hidden");
-      recBadge.classList.remove("hidden");
-      recStartTime = Date.now();
-      recTimerHandle = setInterval(updateRecTimer, 1000);
-    } else {
-      alert(data.error || "Recording failed");
-    }
-  } catch (e) {
-    alert("Network error: " + e.message);
-  }
-}
 
-async function doStopRecording() {
-  try {
-    const res = await fetch(`${API}/record/stop`, { method: "POST" });
-    const data = await res.json();
-    stopRecordingUI();
-    if (res.ok && data.samples > 0) {
-      const ask = confirm(
-        `Recording stopped (${data.samples} samples saved on server).\n\nDo you want to download this CSV file now?`
-      );
-      if (ask) {
-        window.location.href = `${API}/logs/download/latest`;
-      }
-    }
-  } catch (e) {
-    console.error("Stop rec error:", e);
-  }
-}
 
 function exportSessionCSV() {
   if (sessionTelemetryLog.length === 0) {
@@ -800,6 +787,7 @@ function exportSessionCSV() {
     "T_ambient",
     "T_measured",
     "T_predicted",
+    "infer_us",
     "tracking_error",
     "R_theta_JA",
     "fault_code",
@@ -821,21 +809,94 @@ function exportSessionCSV() {
   URL.revokeObjectURL(url);
 }
 
-function stopRecordingUI() {
-  btnRecStop.classList.add("hidden");
-  btnRecStart.classList.remove("hidden");
-  recBadge.classList.add("hidden");
-  clearInterval(recTimerHandle);
-  recStartTime = null;
-}
+function resetWholePage() {
+  // Clear charts
+  thermalChart.data.labels = [];
+  thermalChart.data.datasets.forEach((ds) => (ds.data = []));
+  thermalChart.resetZoom();
+  delete thermalChart.options.scales.x.min;
+  delete thermalChart.options.scales.x.max;
+  thermalChart._isZoomed = false;
+  thermalChart._isPannedBack = false;
+  thermalChart._userSpan = WINDOW_SEC * 1000;
+  updateZoomLabel(thermalChart);
+  thermalChart.update("none");
 
-function updateRecTimer() {
-  if (!recStartTime) return;
-  const elapsed = Math.floor((Date.now() - recStartTime) / 1000);
-  const min = String(Math.floor(elapsed / 60)).padStart(2, "0");
-  const sec = String(elapsed % 60).padStart(2, "0");
-  recTime.textContent = `${min}:${sec}`;
-  recCount.textContent = frameCount;
+  elecChart.data.labels = [];
+  elecChart.data.datasets.forEach((ds) => (ds.data = []));
+  elecChart.resetZoom();
+  delete elecChart.options.scales.x.min;
+  delete elecChart.options.scales.x.max;
+  elecChart._isZoomed = false;
+  elecChart._isPannedBack = false;
+  elecChart._userSpan = WINDOW_SEC * 1000;
+  updateZoomLabel(elecChart);
+  elecChart.update("none");
+
+  // Reset counters & accumulators
+  errorSum = 0;
+  errorSqSum = 0;
+  errorCount = 0;
+  frameCount = 0;
+  malformedCount = 0;
+  latencySum = 0;
+  latencyCount = 0;
+  currentLatestTs = 0;
+  sessionTelemetryLog.length = 0;
+  sessionStart = isConnected ? Date.now() : null;
+
+  // Reset KPI values
+  kpiErrorVal.textContent = "—";
+  kpiMaeVal.textContent = "—";
+  kpiRmseVal.textContent = "—";
+  if (kpiPredTempVal) kpiPredTempVal.textContent = "—";
+  kpiTempVal.textContent = "—";
+  if (kpiPredTimeVal) kpiPredTimeVal.textContent = "—";
+  if (kpiPredTimeSub) kpiPredTimeSub.textContent = "DWT Cycle Latency";
+  if (kpiAvgPredTimeVal) kpiAvgPredTimeVal.textContent = "—";
+  if (kpiAvgPredTimeSub) kpiAvgPredTimeSub.textContent = "Session Mean";
+
+  // Reset thermal zone
+  thermalMarker.style.left = "1%";
+  kpiThermal.classList.remove("glow-red", "glow-amber");
+  thermalDot.className = "w-2.5 h-2.5 rounded-full bg-emerald-500";
+  thermalLabel.textContent = "SAFE (<90°C)";
+  thermalLabel.className = "text-[10px] font-semibold text-emerald-400";
+  kpiTempVal.className = "text-xl font-bold text-emerald-400 tabular-nums";
+  stopAlarm();
+
+  // Reset live readings
+  liveVin.textContent = "—";
+  liveVout.textContent = "—";
+  liveVdrop.textContent = "—";
+  liveIload.textContent = "—";
+  livePdiss.textContent = "—";
+  liveTamb.textContent = "—";
+  liveTmeas.textContent = "—";
+  liveTpred.textContent = "—";
+  if (liveLatency) liveLatency.textContent = "—";
+  if (liveAvgLatency) liveAvgLatency.textContent = "—";
+  if (modelLatency) modelLatency.textContent = "—";
+  if (modelAvgLatency) modelAvgLatency.textContent = "—";
+
+  // Reset session stats
+  statFrames.textContent = "0";
+  statMalformed.textContent = "0";
+  statUptime.textContent = isConnected ? "00:00:00" : "—";
+
+  // Reset diagnostic dots
+  for (let i = 0; i < 4; i++) {
+    if (DIAG_DOTS[i]) DIAG_DOTS[i].className = "w-2 h-2 rounded-full bg-gray-600";
+  }
+
+  // Visual button feedback
+  if (btnResetPage) {
+    const origHtml = btnResetPage.innerHTML;
+    btnResetPage.innerHTML = `<svg class="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg><span class="text-emerald-400">Reset!</span>`;
+    setTimeout(() => {
+      btnResetPage.innerHTML = origHtml;
+    }, 1000);
+  }
 }
 
 // ── Uptime ticker ──
@@ -856,8 +917,7 @@ setInterval(() => {
 btnRefresh.addEventListener("click", fetchPorts);
 btnConnect.addEventListener("click", doConnect);
 btnDisconnect.addEventListener("click", doDisconnect);
-btnRecStart.addEventListener("click", doStartRecording);
-btnRecStop.addEventListener("click", doStopRecording);
+if (btnResetPage) btnResetPage.addEventListener("click", resetWholePage);
 btnExportCsv.addEventListener("click", exportSessionCSV);
 
 // ═══════════════════════════════════════════════════════════════════════════

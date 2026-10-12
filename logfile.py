@@ -25,6 +25,8 @@ HEADER = [
     "power_loss_mW",
     "ambient_temp_C",
     "heatsink_temp_C",
+    "predicted_temp_C",
+    "infer_us",
     "fault_code",
 ]
 
@@ -32,7 +34,7 @@ HEADER = [
 def parse_row(line):
     """Return fields if line is a well-formed data row, else None."""
     fields = [f.strip() for f in line.split(",")]
-    if len(fields) != len(HEADER):
+    if len(fields) not in (len(HEADER), 9, 8):
         return None
     try:
         int(fields[0])

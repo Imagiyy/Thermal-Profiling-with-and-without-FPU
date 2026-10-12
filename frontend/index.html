@@ -58,12 +58,6 @@
     @keyframes blink { 0%,100%{opacity:1;}50%{opacity:.3;} }
     .dot-blink { animation: blink 1s ease-in-out infinite; }
 
-    /* === Recording badge === */
-    @keyframes rec-pulse {
-      0%,100% { opacity:1; }
-      50%     { opacity:.4; }
-    }
-    .rec-dot { animation: rec-pulse 1s ease-in-out infinite; }
 
     /* Glass card */
     .glass {
@@ -138,27 +132,20 @@
     <!-- Spacer -->
     <div class="flex-1"></div>
 
-    <!-- Recording controls -->
-    <button id="btn-rec-start" class="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200
-      bg-gradient-to-r from-red-500 to-red-600 hover:from-red-400 hover:to-red-500 text-white shadow-lg shadow-red-500/20 disabled:opacity-40 disabled:cursor-not-allowed"
-      disabled>
-      ● REC
+    <!-- Reset Dashboard button -->
+    <button id="btn-reset-page" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200
+      bg-surface-850 hover:bg-white/10 text-gray-300 hover:text-white border border-white/10 hover:border-white/20 shadow-sm"
+      title="Reset all charts, live metrics, tracking errors, and session data">
+      <svg class="w-3.5 h-3.5 text-gray-400 group-hover:text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+      </svg>
+      Reset
     </button>
-    <button id="btn-rec-stop" class="hidden px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200
-      bg-gradient-to-r from-gray-500 to-gray-600 hover:from-gray-400 hover:to-gray-500 text-white">
-      ■ STOP
-    </button>
-    <div id="rec-badge" class="hidden flex items-center gap-1.5 bg-red-500/15 border border-red-500/30 rounded-full px-3 py-1">
-      <span class="w-2 h-2 rounded-full bg-red-500 rec-dot"></span>
-      <span id="rec-time" class="text-[11px] font-mono text-red-300">00:00</span>
-      <span class="text-gray-500 text-[11px]">|</span>
-      <span id="rec-count" class="text-[11px] font-mono text-red-300">0</span>
-    </div>
 
     <!-- Export CSV button -->
     <button id="btn-export-csv" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200
       bg-surface-850 hover:bg-white/10 text-brand-400 border border-brand-500/30 hover:border-brand-500 shadow-sm"
-      title="Export all session telemetry as CSV (9 values + tracking error + electrical/thermal metrics)">
+      title="Export all session telemetry as CSV">
       <svg class="w-3.5 h-3.5 text-brand-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
       Export CSV
     </button>
@@ -170,7 +157,7 @@
     overflow-y-auto">
 
     <!-- ─── KPI BADGES ROW ─── -->
-    <section class="lg:col-span-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+    <section class="lg:col-span-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-2.5">
 
       <!-- KPI: Tracking Error -->
       <div id="kpi-error" class="glass rounded-xl p-3 flex flex-col gap-0.5 transition-all hover:border-white/10">
@@ -193,11 +180,11 @@
         <span class="text-[10px] text-gray-500">Root Mean Sq. Error °C</span>
       </div>
 
-      <!-- KPI: R_θJA -->
-      <div class="glass rounded-xl p-3 flex flex-col gap-0.5 transition-all hover:border-white/10">
-        <span class="text-[10px] uppercase tracking-wider text-gray-500 font-medium">R<sub>θJA</sub></span>
-        <span id="kpi-rtheta-val" class="text-xl font-bold text-accent-amber tabular-nums">—</span>
-        <span class="text-[10px] text-gray-500">°C / W</span>
+      <!-- KPI: Predicted Temp -->
+      <div id="kpi-pred-temp" class="glass rounded-xl p-3 flex flex-col gap-0.5 transition-all hover:border-white/10">
+        <span class="text-[10px] uppercase tracking-wider text-gray-500 font-medium">Predicted Temp</span>
+        <span id="kpi-pred-temp-val" class="text-xl font-bold text-accent-lime tabular-nums">—</span>
+        <span class="text-[10px] text-gray-500">T<sub>pred</sub> (1D CNN) °C</span>
       </div>
 
       <!-- KPI: Thermal Safety -->
@@ -210,11 +197,18 @@
         </div>
       </div>
 
-      <!-- KPI: MAX31855 Fault -->
-      <div id="kpi-fault" class="glass rounded-xl p-3 flex flex-col gap-0.5 transition-all hover:border-white/10">
-        <span class="text-[10px] uppercase tracking-wider text-gray-500 font-medium">MAX31855</span>
-        <span id="kpi-fault-val" class="text-xl font-bold text-emerald-400 tabular-nums">OK</span>
-        <div id="fault-pills" class="flex flex-wrap gap-1 mt-0.5"></div>
+      <!-- KPI: Prediction Time (DWT Latency) -->
+      <div id="kpi-pred-time" class="glass rounded-xl p-3 flex flex-col gap-0.5 transition-all hover:border-white/10">
+        <span class="text-[10px] uppercase tracking-wider text-gray-500 font-medium">Prediction Time</span>
+        <span id="kpi-pred-time-val" class="text-xl font-bold text-accent-lime tabular-nums">—</span>
+        <span id="kpi-pred-time-sub" class="text-[10px] text-gray-500">DWT Cycle Latency</span>
+      </div>
+
+      <!-- KPI: Average Prediction Time -->
+      <div id="kpi-avg-pred-time" class="glass rounded-xl p-3 flex flex-col gap-0.5 transition-all hover:border-white/10">
+        <span class="text-[10px] uppercase tracking-wider text-gray-500 font-medium">Avg Pred. Time</span>
+        <span id="kpi-avg-pred-time-val" class="text-xl font-bold text-brand-400 tabular-nums">—</span>
+        <span id="kpi-avg-pred-time-sub" class="text-[10px] text-gray-500">Session Mean</span>
       </div>
     </section>
 
@@ -279,6 +273,8 @@
             <tr><td class="py-1 text-gray-400">T<sub>ambient</sub></td><td id="live-tamb" class="py-1 text-right font-mono tabular-nums">—</td></tr>
             <tr><td class="py-1 text-gray-400">T<sub>measured</sub></td><td id="live-tmeas" class="py-1 text-right font-mono tabular-nums">—</td></tr>
             <tr><td class="py-1 text-gray-400">T<sub>predicted</sub></td><td id="live-tpred" class="py-1 text-right font-mono tabular-nums">—</td></tr>
+            <tr><td class="py-1 text-gray-400">Pred. Time</td><td id="live-latency" class="py-1 text-right font-mono tabular-nums text-accent-lime">—</td></tr>
+            <tr><td class="py-1 text-gray-400">Avg Pred. Time</td><td id="live-avg-latency" class="py-1 text-right font-mono tabular-nums text-brand-400">—</td></tr>
           </tbody>
         </table>
       </div>
@@ -323,8 +319,10 @@
           <div>Arch: <span class="text-gray-200">1D CNN (INT8)</span></div>
           <div>Array: <span class="text-gray-200 font-mono">cnn_thermal_model</span></div>
           <div>Size: <span class="text-gray-200">11,504 bytes</span></div>
-          <div>MCU: <span class="text-gray-200">STM32F401RE</span></div>
+          <div>MCU: <span class="text-gray-200">STM32F401RE (16 MHz)</span></div>
           <div>Board: <span class="text-gray-200">Nucleo-F401RE</span></div>
+          <div>Pred. Time: <span id="model-latency" class="text-accent-lime font-mono font-medium">—</span></div>
+          <div>Avg Latency: <span id="model-avg-latency" class="text-brand-400 font-mono font-medium">—</span></div>
         </div>
       </div>
     </section>
