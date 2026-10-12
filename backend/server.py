@@ -554,6 +554,20 @@ async def disconnect():
     return {"connected": False}
 
 
+@app.post("/api/reset")
+async def reset_session():
+    """Reset the session: disconnect serial port, clear frame cache and counters."""
+    if state.connected:
+        _disconnect()
+    with state.lock:
+        state.latest_frame = None
+        state.total_frames = 0
+        state.malformed_frames = 0
+    broadcast({"type": "status", "connected": False, "reason": "reset"})
+    log.info("Session reset via API.")
+    return {"reset": True, "connected": False}
+
+
 # ---------------------------------------------------------------------------
 # CSV recording endpoints
 # ---------------------------------------------------------------------------

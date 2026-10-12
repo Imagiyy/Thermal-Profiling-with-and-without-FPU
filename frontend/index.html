@@ -184,7 +184,7 @@
       <div id="kpi-pred-temp" class="glass rounded-xl p-3 flex flex-col gap-0.5 transition-all hover:border-white/10">
         <span class="text-[10px] uppercase tracking-wider text-gray-500 font-medium">Predicted Temp</span>
         <span id="kpi-pred-temp-val" class="text-xl font-bold text-accent-lime tabular-nums">—</span>
-        <span class="text-[10px] text-gray-500">T<sub>pred</sub> (1D CNN) °C</span>
+        <span class="text-[10px] text-gray-500">T<sub>pred</sub> (TinyML) °C</span>
       </div>
 
       <!-- KPI: Thermal Safety -->
@@ -217,7 +217,7 @@
       <div class="flex items-center justify-between mb-2">
         <div>
           <h2 class="text-sm font-semibold text-gray-200">Thermal Tracking</h2>
-          <p class="text-[10px] text-gray-500">T<sub>measured</sub> vs T<sub>predicted</sub> (1D CNN INT8) vs T<sub>ambient</sub> — <span id="thermal-window-lbl">120s</span> window</p>
+          <p class="text-[10px] text-gray-500">T<sub>measured</sub> vs T<sub>predicted</sub> (TinyML) vs T<sub>ambient</sub> — <span id="thermal-window-lbl">120s</span> window</p>
         </div>
         <div class="flex items-center gap-1 bg-surface-850 p-1 rounded-lg border border-white/5">
           <button id="btn-thermal-zoom-in" title="Zoom In (+)" class="w-6 h-6 flex items-center justify-center text-xs font-bold rounded bg-white/5 hover:bg-white/15 text-gray-300 hover:text-white transition-colors">+</button>
@@ -314,10 +314,10 @@
 
       <!-- Model info -->
       <div class="rounded-lg bg-surface-850 p-3 border border-white/5">
-        <span class="text-[10px] uppercase tracking-wider text-gray-500">CNN Model</span>
+        <span class="text-[10px] uppercase tracking-wider text-gray-500">TinyML Model</span>
         <div class="mt-2 text-xs space-y-1 text-gray-400">
-          <div>Arch: <span class="text-gray-200">1D CNN (INT8)</span></div>
-          <div>Array: <span class="text-gray-200 font-mono">cnn_thermal_model</span></div>
+          <div>Arch: <span class="text-gray-200">TinyML (INT8)</span></div>
+          <div>Array: <span class="text-gray-200 font-mono">tinyml_thermal_model</span></div>
           <div>Size: <span class="text-gray-200">11,504 bytes</span></div>
           <div>MCU: <span class="text-gray-200">STM32F401RE (16 MHz)</span></div>
           <div>Board: <span class="text-gray-200">Nucleo-F401RE</span></div>
@@ -349,7 +349,7 @@
 
   <!-- ════════════════════════════  FOOTER  ════════════════════════════ -->
   <footer class="text-center text-[10px] text-gray-600 py-2 border-t border-white/5">
-    Project ThermoGuard &middot; KA7808 Thermal Profiling &middot; STM32 Nucleo-F401RE &middot; INT8 1D CNN
+    Project ThermoGuard &middot; KA7808 Thermal Profiling &middot; STM32 Nucleo-F401RE &middot; TinyML Inference
   </footer>
 
   <!-- Audible alert (70°C+) -->

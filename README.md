@@ -76,18 +76,16 @@ If your physical board is disconnected or not yet flashed:
 
 ## 📊 Dashboard Features
 
-* **Prediction Time**: Real-time TinyML INT8 CNN inference latency measured directly on Cortex-M4 hardware via the **DWT cycle counter** ($\mu\text{s}$ and $\text{ms}$).
+* **Prediction Time**: Real-time TinyML inference latency measured directly on Cortex-M4 hardware via the **DWT cycle counter** ($\mu\text{s}$ and $\text{ms}$).
 * **Avg Pred. Time**: Cumulative session mean inference latency.
 * **Thermal Tracking Chart**: Live rolling 120s window plotting:
   - $T_{\text{measured}}$ (MAX31855 thermocouple on regulator heatsink)
-  - $T_{\text{predicted}}$ (1D CNN INT8 TinyML model output)
+  - $T_{\text{predicted}}$ (TinyML model output)
   - $T_{\text{ambient}}$ (BME280 room temperature)
 * **Predicted Temp KPI**: Real-time TinyML model output ($T_{\text{predicted}}$ in $^\circ\text{C}$).
 * **Heatsink Temp KPI & Safety Zone**: Measured temperature ($T_{\text{measured}}$) with active warning and critical trip zones.
 * **Tracking Error Metrics**: Instantaneous tracking error, session **MAE**, and **RMSE**.
-* **Live CSV Recording**:
-  - Click **● REC** to record live telemetry into the `logs/` directory.
-  - Click **■ STOP** to save and optionally download the CSV.
+* **Reset & Session Management**: Click **Reset** to clear all charts, counters, and statistics for a fresh session.
 * **Export CSV**: Click **Export CSV** at any time to export the full in-memory session dataset.
 
 ---

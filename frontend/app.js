@@ -809,7 +809,15 @@ function exportSessionCSV() {
   URL.revokeObjectURL(url);
 }
 
-function resetWholePage() {
+async function resetWholePage() {
+  // If currently connected or receiving, disconnect and reset backend state
+  try {
+    await fetch(`${API}/reset`, { method: "POST" });
+  } catch (e) {
+    console.warn("Backend reset request error:", e);
+  }
+  setConnectionUI(false);
+
   // Clear charts
   thermalChart.data.labels = [];
   thermalChart.data.datasets.forEach((ds) => (ds.data = []));
@@ -843,26 +851,26 @@ function resetWholePage() {
   latencyCount = 0;
   currentLatestTs = 0;
   sessionTelemetryLog.length = 0;
-  sessionStart = isConnected ? Date.now() : null;
+  sessionStart = null;
 
-  // Reset KPI values
+  // Reset all top row KPI cards
   kpiErrorVal.textContent = "—";
   kpiMaeVal.textContent = "—";
   kpiRmseVal.textContent = "—";
   if (kpiPredTempVal) kpiPredTempVal.textContent = "—";
   kpiTempVal.textContent = "—";
+  kpiTempVal.className = "text-xl font-bold text-emerald-400 tabular-nums";
   if (kpiPredTimeVal) kpiPredTimeVal.textContent = "—";
   if (kpiPredTimeSub) kpiPredTimeSub.textContent = "DWT Cycle Latency";
   if (kpiAvgPredTimeVal) kpiAvgPredTimeVal.textContent = "—";
   if (kpiAvgPredTimeSub) kpiAvgPredTimeSub.textContent = "Session Mean";
 
-  // Reset thermal zone
+  // Reset thermal zone & safety indicators
   thermalMarker.style.left = "1%";
   kpiThermal.classList.remove("glow-red", "glow-amber");
   thermalDot.className = "w-2.5 h-2.5 rounded-full bg-emerald-500";
-  thermalLabel.textContent = "SAFE (<90°C)";
+  thermalLabel.textContent = "SAFE";
   thermalLabel.className = "text-[10px] font-semibold text-emerald-400";
-  kpiTempVal.className = "text-xl font-bold text-emerald-400 tabular-nums";
   stopAlarm();
 
   // Reset live readings
@@ -882,7 +890,7 @@ function resetWholePage() {
   // Reset session stats
   statFrames.textContent = "0";
   statMalformed.textContent = "0";
-  statUptime.textContent = isConnected ? "00:00:00" : "—";
+  statUptime.textContent = "—";
 
   // Reset diagnostic dots
   for (let i = 0; i < 4; i++) {
