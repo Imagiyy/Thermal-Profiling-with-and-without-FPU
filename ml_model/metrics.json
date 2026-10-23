@@ -1,0 +1,25 @@
+{
+  "zero_leakage_guarantee": {
+    "temporal_split": "First 80% train, unseen last 20% test per continuous load dataset",
+    "embargo_gap_seconds": 15,
+    "scaler_policy": "Fitted strictly on df_train; only transform() called on df_test",
+    "dropped_datasets": [
+      "zeroinput.csv"
+    ],
+    "dropped_columns": [
+      "predicted_temp_C"
+    ]
+  },
+  "train": {
+    "MAE": 0.3435060125534211,
+    "RMSE": 0.45522030896366983,
+    "R2": 0.9991004958153913,
+    "samples": 4346
+  },
+  "holdout_test": {
+    "MAE": 1.3941011781811785,
+    "RMSE": 1.6713991853118018,
+    "R2": 0.9836610167051412,
+    "samples": 998
+  }
+}

@@ -10,6 +10,12 @@
 #include "stm32f401xe.h"
 #include <stdint.h>
 
+#if __has_include("mlp_model.h")
+#include "mlp_model.h"
+#elif __has_include("ml_model/mlp_model.h")
+#include "ml_model/mlp_model.h"
+#endif
+
 /* =========================== USER CONFIGURATION =========================== */
 #define SAMPLE_PERIOD_MS   500U
 
@@ -38,6 +44,10 @@
 #define F_ADC              0x40U
 
 /* ============================= TINYML INFERENCE =========================== */
+__attribute__((weak)) void mlp_reset_timebase(void)
+{
+}
+
 __attribute__((weak)) int32_t cnn_predict_temp_cC(int32_t ploss_cmW, int32_t i_cmA, int32_t amb_cC, int32_t hs_cC)
 {
     (void)ploss_cmW;
@@ -590,6 +600,7 @@ int main(void)
         if (vin_mV < 1000) {
             i_cmA = 0;
             ploss_cmW = 0;
+            mlp_reset_timebase();
         } else if (!(fault & (F_INA219 | F_ADC))) {
             /* Regulator dissipation: (Vin - Vout) * Iin */
             int64_t dv = (int64_t)vin_mV - (int64_t)vout_mV;

@@ -1,6 +1,6 @@
 # ThermoGuard — TinyML Thermal Profiling Dashboard
 
-Real-time telemetry and edge TinyML inference benchmarking dashboard for the **STM32 Nucleo-64 F401RE** (KA7808 voltage regulator thermal profiling).
+Real-time telemetry and edge TinyML inference benchmarking dashboard for the **STM32 Nucleo-64 F401RE** (KA7808 voltage regulator thermal profiling), featuring an MLP model trained from sensor data and deployed as pure C for bare-metal inference.
 
 ---
 
@@ -12,13 +12,25 @@ Ensure Python 3.8+ is installed, then install the required packages:
 
 ```bash
 pip install -r requirements.txt
+pip install -r ml_model/requirements.txt
 ```
 
-*(Packages installed: `fastapi`, `uvicorn[standard]`, `pyserial`)*
+*(Core: `fastapi`, `uvicorn[standard]`, `pyserial` — ML: `numpy`, `pandas`, `scikit-learn`, `matplotlib`)*
 
 ---
 
-### 2. Start the Server
+### 2. Train the ML Model (First Time Setup)
+
+```bash
+cd ml_model
+python train_mlp.py
+```
+
+This trains an MLP on your sensor dataset and auto-generates `mlp_model.c` / `mlp_model.h` for STM32 deployment. See the [ML Model section](#-ml-model-training--deployment) below for full details.
+
+---
+
+### 3. Start the Server
 
 From the project root directory, run:
 
@@ -33,7 +45,7 @@ python3 backend/server.py
 
 ---
 
-### 3. Open the Dashboard
+### 4. Open the Dashboard
 
 Open your web browser and navigate to:
 
@@ -90,6 +102,81 @@ If your physical board is disconnected or not yet flashed:
 
 ---
 
+## 🧠 ML Model Training & Deployment
+
+### Overview
+
+The `ml_model/` folder contains a complete pipeline to:
+1. **Train** an MLP regressor (scikit-learn) on your thermal dataset
+2. **Evaluate** with plots and metrics
+3. **Export** the trained model as pure C code for STM32F401RE
+
+### Architecture
+
+```
+Input (3 features)  →  Dense(16, ReLU)  →  Dense(8, ReLU)  →  Dense(1)  →  Predicted Temp
+   power_loss_mW                                                              heatsink_temp_C
+   current_mA
+   ambient_temp_C
+```
+
+Total: **209 parameters** — fits comfortably in flash with ~1 KB footprint.
+
+### Training
+
+```bash
+cd ml_model
+python train_mlp.py
+```
+
+**Custom options:**
+```bash
+python train_mlp.py --epochs 5000              # more iterations
+python train_mlp.py --hidden 32,16,8           # bigger network
+python train_mlp.py --test-size 0.3            # 70/30 split
+python train_mlp.py --no-export                # skip C export
+```
+
+### Deploying to STM32
+
+After training, two C files are auto-generated: `mlp_model.h` and `mlp_model.c`.
+
+**Step 1:** Copy them next to `main.c`:
+```bash
+cp ml_model/mlp_model.h  .
+cp ml_model/mlp_model.c  .
+```
+
+**Step 2:** Add to your build. For bare-metal GCC:
+```bash
+arm-none-eabi-gcc -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 \
+    -O2 -Wall \
+    -T linker_script.ld \
+    main.c mlp_model.c \
+    -o thermoguard.elf \
+    -nostartfiles -lm
+```
+
+**Step 3:** Flash via ST-Link:
+```bash
+st-flash write thermoguard.bin 0x08000000
+```
+
+> **Important:** The generated `cnn_predict_temp_cC()` function overrides the `__attribute__((weak))` stub in `main.c` automatically — **no firmware code changes needed!**
+
+> **FPU flags are mandatory:** `-mfloat-abi=hard -mfpu=fpv4-sp-d16` — without these, the compiler uses slow software floating-point.
+
+### Re-training After New Data
+
+1. Add new CSV files to `dataset/` (same column format as existing files)
+2. Run `python ml_model/train_mlp.py`
+3. Copy the regenerated `mlp_model.c` / `.h` to your STM32 project
+4. Rebuild and re-flash
+
+For full details, see [`ml_model/README.md`](ml_model/README.md).
+
+---
+
 ## 📁 Project Structure
 
 ```text
@@ -98,11 +185,23 @@ If your physical board is disconnected or not yet flashed:
 ├── frontend/
 │   ├── index.html         # Tailwind CSS + Chart.js responsive dashboard UI
 │   └── app.js             # WebSocket client, KPI calculations, dynamic charts
+├── dataset/               # Thermal profiling CSV datasets (10Ω, 20Ω, no-load, zero-input)
+├── ml_model/
+│   ├── train_mlp.py       # MLP training pipeline (load → train → evaluate → export C)
+│   ├── mlp_model.c        # Auto-generated C inference code for STM32F401RE
+│   ├── mlp_model.h        # Auto-generated C header (function prototype)
+│   ├── mlp_model.joblib   # Serialised sklearn model + scaler
+│   ├── mlp_weights.json   # Raw weights/biases (JSON)
+│   ├── scaler_params.json # StandardScaler normalisation parameters
+│   ├── metrics.json       # Train/test evaluation metrics
+│   ├── training_report.png# Evaluation plots
+│   ├── requirements.txt   # ML Python dependencies
+│   └── README.md          # Detailed ML model documentation
 ├── logs/                  # Timestamped telemetry CSV recordings
 ├── main.c                 # Bare-metal STM32F401RE C firmware (10-field CSV, DWT benchmarking)
 ├── logfile.py             # Standalone Python CLI logger for terminal recording
-├── requirements.txt       # Python package dependencies
-└── README.md              # Project documentation
+├── requirements.txt       # Python package dependencies (server)
+└── README.md              # Project documentation (this file)
 ```
 
 ---
