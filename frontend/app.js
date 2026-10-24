@@ -433,6 +433,66 @@ function stopAlarm() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// TRANSIENT GLITCH FILTER (Hold-Last-Valid on 10 °C fluctuation for <= 2 points)
+// ═══════════════════════════════════════════════════════════════════════════
+
+let cleanTmeas = null;
+let measGlitchCount = 0;
+let cleanTpred = null;
+let predGlitchCount = 0;
+
+function filterTempGlitch(type, val, threshold = 10.0, maxPoints = 2) {
+  if (type === "meas") {
+    if (cleanTmeas === null) {
+      if (val > 0) cleanTmeas = val;
+      return val;
+    }
+    const isGlitch = (val <= 0) || Math.abs(val - cleanTmeas) >= threshold;
+    if (isGlitch) {
+      measGlitchCount++;
+      if (measGlitchCount <= maxPoints) {
+        return cleanTmeas; // Freeze display to last stable reading
+      } else {
+        cleanTmeas = val;
+        measGlitchCount = 0;
+        return val;
+      }
+    } else {
+      cleanTmeas = val;
+      measGlitchCount = 0;
+      return val;
+    }
+  } else {
+    if (cleanTpred === null) {
+      if (val > 0) cleanTpred = val;
+      return val;
+    }
+    const isGlitch = (val <= 0) || Math.abs(val - cleanTpred) >= threshold;
+    if (isGlitch) {
+      predGlitchCount++;
+      if (predGlitchCount <= maxPoints) {
+        return cleanTpred; // Freeze display to last stable reading
+      } else {
+        cleanTpred = val;
+        predGlitchCount = 0;
+        return val;
+      }
+    } else {
+      cleanTpred = val;
+      predGlitchCount = 0;
+      return val;
+    }
+  }
+}
+
+function resetTempGlitchFilters() {
+  cleanTmeas = null;
+  measGlitchCount = 0;
+  cleanTpred = null;
+  predGlitchCount = 0;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // TELEMETRY HANDLER
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -442,6 +502,11 @@ function stopAlarm() {
 function handleTelemetry(d) {
   frameCount++;
   statFrames.textContent = frameCount;
+
+  // ── Transient Glitch Filter (Freezes display if temp fluctuates >= 10 °C for <= 2 points) ──
+  d.T_measured = filterTempGlitch("meas", d.T_measured);
+  d.T_predicted = filterTempGlitch("pred", d.T_predicted);
+  d.tracking_error = Math.abs(d.T_measured - d.T_predicted);
 
   const ts = d.timestamp_ms;
 
@@ -843,6 +908,7 @@ async function resetWholePage() {
   elecChart.update("none");
 
   // Reset counters & accumulators
+  resetTempGlitchFilters();
   errorSum = 0;
   errorSqSum = 0;
   errorCount = 0;

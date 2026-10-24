@@ -598,11 +598,42 @@ int main(void)
             else if (r < 0)   { hs_cC = 0; fault |= F_MAX_COMM; }
         }
 
+        /* Anti-glitch freeze filter for measured heatsink temperature:
+         * If temperature drops to 0 (SPI noise) or fluctuates >= 10.0 °C (1000 cC)
+         * for only 1 or 2 points, freeze display to the last valid stable temperature.
+         * Only accept the change if it persists for >= 3 consecutive samples. */
+        static int32_t s_clean_hs_cC = 0;
+        static uint8_t s_hs_glitch_cnt = 0;
+
+        if (s_clean_hs_cC == 0) {
+            if (hs_cC > 0) {
+                s_clean_hs_cC = hs_cC;
+            }
+        } else {
+            int32_t diff_hs = hs_cC - s_clean_hs_cC;
+            if (diff_hs < 0) diff_hs = -diff_hs;
+
+            if (hs_cC <= 0 || diff_hs >= 1000) {
+                s_hs_glitch_cnt++;
+                if (s_hs_glitch_cnt <= 2) {
+                    hs_cC = s_clean_hs_cC; /* Freeze to last stable reading */
+                } else {
+                    /* Persisted for > 2 samples: accept legitimate step change */
+                    s_clean_hs_cC = hs_cC;
+                    s_hs_glitch_cnt = 0;
+                }
+            } else {
+                s_clean_hs_cC = hs_cC;
+                s_hs_glitch_cnt = 0;
+            }
+        }
+
         /* Persistent thermal prediction state (for smooth passive cooling decay) */
         static int32_t s_pred_cC = 0;
 
-        /* Threshold Rule: If Vin < 1000 mV (1.0 V), regulator is unpowered -> COOLING PHASE */
-        if (vin_mV < 1000) {
+        /* Threshold Rule: If Vin < 8500 mV (8.5 V), regulator is unpowered -> COOLING PHASE
+         * (KA7808 requires Vin >= 9.5 V to regulate 8.0 V; avoids 30s cap discharge noise) */
+        if (vin_mV < 8500) {
             i_cmA = 0;
             ploss_cmW = 0;
             mlp_reset_timebase();
@@ -645,8 +676,37 @@ int main(void)
             if (pred_cC > 12500) {
                 pred_cC = 12500;
             }
-            s_pred_cC = pred_cC;
         }
+
+        /* Anti-glitch freeze filter for predicted temperature:
+         * Suppress transient prediction fluctuations >= 10.0 °C (1000 cC) lasting <= 2 samples */
+        static int32_t s_clean_pred_cC = 0;
+        static uint8_t s_pred_glitch_cnt = 0;
+
+        if (s_clean_pred_cC == 0) {
+            if (pred_cC > 0) {
+                s_clean_pred_cC = pred_cC;
+            }
+        } else {
+            int32_t diff_pred = pred_cC - s_clean_pred_cC;
+            if (diff_pred < 0) diff_pred = -diff_pred;
+
+            if (diff_pred >= 1000) {
+                s_pred_glitch_cnt++;
+                if (s_pred_glitch_cnt <= 2) {
+                    pred_cC = s_clean_pred_cC; /* Freeze display to last stable reading */
+                } else {
+                    /* Persisted for > 2 samples: accept legitimate step change */
+                    s_clean_pred_cC = pred_cC;
+                    s_pred_glitch_cnt = 0;
+                }
+            } else {
+                s_clean_pred_cC = pred_cC;
+                s_pred_glitch_cnt = 0;
+            }
+        }
+
+        s_pred_cC = pred_cC;
 
         /* Build and send the CSV line (10 fields) */
         char  line[144];

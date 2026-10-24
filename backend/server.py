@@ -135,6 +135,69 @@ class TelemetryState:
         self.total_frames: int = 0
         self.malformed_frames: int = 0
 
+        # Anti-glitch freeze filter state (freezes display if temp fluctuates >= 10.0 °C for <= 2 samples)
+        self.clean_t_meas: float | None = None
+        self.meas_glitch_cnt: int = 0
+        self.clean_t_pred: float | None = None
+        self.pred_glitch_cnt: int = 0
+
+    def filter_temperatures(self, t_meas: float, t_pred: float) -> tuple[float, float]:
+        """
+        Anti-glitch freezing filter:
+        If temperature fluctuates >= 10.0 °C for <= 2 samples (or drops to <= 0 °C on SPI error),
+        freeze display to the last valid stable temperature.
+        Only accept change if it persists for >= 3 consecutive samples.
+        """
+        with self.lock:
+            # 1. Measured heatsink filter
+            if self.clean_t_meas is None:
+                if t_meas > 0.0:
+                    self.clean_t_meas = t_meas
+                out_meas = t_meas
+            else:
+                is_meas_glitch = (t_meas <= 0.0) or (abs(t_meas - self.clean_t_meas) >= 10.0)
+                if is_meas_glitch:
+                    self.meas_glitch_cnt += 1
+                    if self.meas_glitch_cnt <= 2:
+                        out_meas = self.clean_t_meas  # Freeze display to last stable reading
+                    else:
+                        self.clean_t_meas = t_meas
+                        self.meas_glitch_cnt = 0
+                        out_meas = t_meas
+                else:
+                    self.clean_t_meas = t_meas
+                    self.meas_glitch_cnt = 0
+                    out_meas = t_meas
+
+            # 2. Predicted temperature filter
+            if self.clean_t_pred is None:
+                if t_pred > 0.0:
+                    self.clean_t_pred = t_pred
+                out_pred = t_pred
+            else:
+                is_pred_glitch = (t_pred <= 0.0) or (abs(t_pred - self.clean_t_pred) >= 10.0)
+                if is_pred_glitch:
+                    self.pred_glitch_cnt += 1
+                    if self.pred_glitch_cnt <= 2:
+                        out_pred = self.clean_t_pred  # Freeze display to last stable reading
+                    else:
+                        self.clean_t_pred = t_pred
+                        self.pred_glitch_cnt = 0
+                        out_pred = t_pred
+                else:
+                    self.clean_t_pred = t_pred
+                    self.pred_glitch_cnt = 0
+                    out_pred = t_pred
+
+            return round(out_meas, 2), round(out_pred, 2)
+
+    def reset_filters(self) -> None:
+        with self.lock:
+            self.clean_t_meas = None
+            self.meas_glitch_cnt = 0
+            self.clean_t_pred = None
+            self.pred_glitch_cnt = 0
+
 
 state = TelemetryState()
 
@@ -179,13 +242,16 @@ def parse_frame(raw_line: str) -> dict | None:
     except (ValueError, IndexError):
         return None
 
-    # Software Rule: Vin threshold (< 1.0 V -> clamp current, power, and drop to 0)
-    if v_in < 1.0:
+    # Software Rule: Vin threshold (< 8.5 V -> regulator unpowered / cooling phase)
+    if v_in < 8.5:
         i_ma = 0.0
         p_mw = 0.0
         v_drop = 0.0
     else:
         v_drop = round(max(0.0, v_in - v_out), 3)
+
+    # Anti-glitch freeze filter: suppress temperature fluctuations >= 10.0 °C lasting <= 2 samples
+    t_meas, t_pred = state.filter_temperatures(t_meas, t_pred)
 
     return {
         "timestamp_ms": ts,
@@ -499,6 +565,7 @@ async def connect(port: str, baud: int = DEFAULT_BAUD):
         state.stop_event.clear()
         state.total_frames = 0
         state.malformed_frames = 0
+        state.reset_filters()
 
         t = threading.Thread(target=virtual_reader, daemon=True, name="virtual-reader")
         state.reader_thread = t
@@ -520,6 +587,7 @@ async def connect(port: str, baud: int = DEFAULT_BAUD):
     state.stop_event.clear()
     state.total_frames = 0
     state.malformed_frames = 0
+    state.reset_filters()
 
     t = threading.Thread(target=serial_reader, daemon=True, name="serial-reader")
     state.reader_thread = t
@@ -541,6 +609,7 @@ def _disconnect() -> None:
             pass
     state.connected = False
     state.serial_conn = None
+    state.reset_filters()
 
 
 @app.post("/api/disconnect")
@@ -563,6 +632,7 @@ async def reset_session():
         state.latest_frame = None
         state.total_frames = 0
         state.malformed_frames = 0
+    state.reset_filters()
     broadcast({"type": "status", "connected": False, "reason": "reset"})
     log.info("Session reset via API.")
     return {"reset": True, "connected": False}
