@@ -10,7 +10,11 @@
 #include "stm32f401xe.h"
 #include <stdint.h>
 
-#if __has_include("mlp_model.h")
+#if __has_include("mlp_model_new.h")
+#include "mlp_model_new.h"
+#elif __has_include("New_models/mlp_model_new.h")
+#include "New_models/mlp_model_new.h"
+#elif __has_include("mlp_model.h")
 #include "mlp_model.h"
 #elif __has_include("ml_model/mlp_model.h")
 #include "ml_model/mlp_model.h"
@@ -48,12 +52,17 @@ __attribute__((weak)) void mlp_reset_timebase(void)
 {
 }
 
+__attribute__((weak)) int32_t mlp_new_predict_temp_cC(int32_t hs_cC, int32_t amb_cC)
+{
+    (void)amb_cC;
+    return hs_cC;
+}
+
 __attribute__((weak)) int32_t cnn_predict_temp_cC(int32_t ploss_cmW, int32_t i_cmA, int32_t amb_cC, int32_t hs_cC)
 {
     (void)ploss_cmW;
     (void)i_cmA;
-    (void)amb_cC;
-    return hs_cC;
+    return mlp_new_predict_temp_cC(hs_cC, amb_cC);
 }
 
 /* ================================ TIMEBASE ================================ */
@@ -663,9 +672,9 @@ int main(void)
                 ploss_cmW = 0;
             }
 
-            /* Benchmark TinyML inference latency via DWT */
+            /* Benchmark TinyML inference latency via DWT (mlp_model_new: heatsink + ambient -> future temp) */
             uint32_t t_start = DWT->CYCCNT;
-            pred_cC = cnn_predict_temp_cC(ploss_cmW, i_cmA, amb_cC, hs_cC);
+            pred_cC = mlp_new_predict_temp_cC(hs_cC, amb_cC);
             uint32_t infer_cycles = DWT->CYCCNT - t_start;
             infer_us = infer_cycles / 16U; /* 16 MHz HSI: 16 cycles = 1 us */
 
