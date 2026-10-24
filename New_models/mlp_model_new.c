@@ -11,31 +11,39 @@
 
 /* Feature Normalisation (StandardScaler) */
 static const float scaler_mean[2] = {
-    68.17805822f, 33.20679808f
+    68.17805822f, 28.58158989f
 };
 static const float scaler_scale[2] = {
-    15.35353778f, 0.20280992f
+    15.35353778f, 6.69172072f
 };
 
 /* Layer 0: Weights [2 x 8] */
 static const float W0[16] = {
-    -0.12035448f,  1.92869996f,  0.19087808f,  1.76751756f,  1.40198652f, -0.28563257f, -0.86826510f,  0.24875921f,
-     0.09334612f, -0.44885203f, -0.27328899f,  1.25753733f,  1.26653665f, -0.24495334f, -1.94424009f, -0.24065915f
+    -0.18663535f,  2.74716792f,  0.00303465f,  2.83030169f, -0.54742916f, -3.06951409f, -0.04001035f,  0.17388869f,
+     1.19469390f,  0.23851692f, -0.29622779f,  0.30987871f,  1.53858908f, -0.29915177f, -2.86772334f, -0.11337092f
 };
 static const float b0[8] = {
-    -0.36480568f,  4.38642455f, -0.45042314f,  4.60872958f,  4.47527867f, -0.76644414f,  4.66252550f, -0.47535494f
+     3.72803479f,  3.53439226f, -0.48075091f,  3.66370184f,  3.91097712f, -3.97619813f,  4.35051909f, -0.51953428f
 };
 
 /* Layer 1: Weights [8 x 1] */
 static const float W1[8] = {
-    -0.01704816f,  3.80263226f, -0.21193366f,  3.34556220f,  3.79997410f, -0.59523408f,  3.75771813f, -0.34896849f
+     3.75073703f,  3.42906860f, -0.18346456f,  3.02047823f,  3.23502585f, -5.83439638f,  3.89480379f, -0.28393094f
 };
 static const float b1[1] = {
-     1.59955612f
+     1.42442354f
 };
 
 int32_t mlp_new_predict_temp_cC(int32_t hs_cC, int32_t amb_cC)
 {
+    /*
+     * Sanity clamp ambient reading to realistic operating room conditions [10 °C, 45 °C].
+     * If BME280 sensor is disconnected or reading <= 0, default to 25 °C (2500 cC).
+     */
+    if (amb_cC <= 1000 || amb_cC >= 5000) {
+        amb_cC = 2500;
+    }
+
     /*
      * Feature extraction:
      *   x[0] = heatsink_temp_C = hs_cC  / 100.0f  (centi-°C -> °C)

@@ -16,13 +16,13 @@
     "flash_bytes": 164,
     "ram_bytes": 64,
     "est_latency_us": 12.0,
-    "test_mae": 2.4407,
-    "test_rmse": 3.6378,
-    "test_r2": 0.9241,
-    "train_mae": 0.1494,
-    "train_r2": 0.9998,
-    "n_iter": 353,
-    "train_time_s": 2.02
+    "test_mae": 0.1654,
+    "test_rmse": 0.246,
+    "test_r2": 0.9997,
+    "train_mae": 0.1269,
+    "train_r2": 0.9999,
+    "n_iter": 79,
+    "train_time_s": 5.18
   },
   {
     "formulation": "Thermal Predictor + Time (3-feat)",
@@ -41,13 +41,13 @@
     "flash_bytes": 324,
     "ram_bytes": 128,
     "est_latency_us": 24.0,
-    "test_mae": 2.0993,
-    "test_rmse": 3.2602,
-    "test_r2": 0.939,
-    "train_mae": 0.2458,
-    "train_r2": 0.9995,
-    "n_iter": 490,
-    "train_time_s": 3.25
+    "test_mae": 0.3722,
+    "test_rmse": 0.6069,
+    "test_r2": 0.9979,
+    "train_mae": 0.1256,
+    "train_r2": 0.9999,
+    "n_iter": 85,
+    "train_time_s": 6.85
   },
   {
     "formulation": "Thermal Predictor + Time (3-feat)",
@@ -66,13 +66,13 @@
     "flash_bytes": 644,
     "ram_bytes": 256,
     "est_latency_us": 48.0,
-    "test_mae": 2.955,
-    "test_rmse": 3.7696,
-    "test_r2": 0.9185,
-    "train_mae": 0.3394,
-    "train_r2": 0.9991,
-    "n_iter": 305,
-    "train_time_s": 2.53
+    "test_mae": 0.5873,
+    "test_rmse": 1.0858,
+    "test_r2": 0.9932,
+    "train_mae": 0.1261,
+    "train_r2": 0.9999,
+    "n_iter": 94,
+    "train_time_s": 8.77
   },
   {
     "formulation": "Thermal Predictor + Time (3-feat)",
@@ -92,13 +92,13 @@
     "flash_bytes": 836,
     "ram_bytes": 128,
     "est_latency_us": 69.0,
-    "test_mae": 1.3223,
-    "test_rmse": 1.7325,
-    "test_r2": 0.9828,
-    "train_mae": 0.1919,
-    "train_r2": 0.9997,
-    "n_iter": 311,
-    "train_time_s": 3.03
+    "test_mae": 0.3162,
+    "test_rmse": 0.4938,
+    "test_r2": 0.9986,
+    "train_mae": 0.1239,
+    "train_r2": 0.9999,
+    "n_iter": 62,
+    "train_time_s": 6.94
   },
   {
     "formulation": "Thermal Predictor + Time (3-feat)",
@@ -118,13 +118,13 @@
     "flash_bytes": 2692,
     "ram_bytes": 256,
     "est_latency_us": 234.0,
-    "test_mae": 2.9528,
-    "test_rmse": 4.3434,
-    "test_r2": 0.8918,
-    "train_mae": 0.1844,
-    "train_r2": 0.9997,
-    "n_iter": 170,
-    "train_time_s": 1.92
+    "test_mae": 0.6381,
+    "test_rmse": 1.1312,
+    "test_r2": 0.9927,
+    "train_mae": 0.1245,
+    "train_r2": 0.9999,
+    "n_iter": 51,
+    "train_time_s": 6.89
   },
   {
     "formulation": "Thermal Predictor + Time (3-feat)",
@@ -145,13 +145,13 @@
     "flash_bytes": 1924,
     "ram_bytes": 128,
     "est_latency_us": 165.0,
-    "test_mae": 0.7467,
-    "test_rmse": 0.895,
-    "test_r2": 0.9954,
-    "train_mae": 0.145,
+    "test_mae": 1.0207,
+    "test_rmse": 1.8378,
+    "test_r2": 0.9806,
+    "train_mae": 0.1249,
     "train_r2": 0.9999,
-    "n_iter": 221,
-    "train_time_s": 2.84
+    "n_iter": 52,
+    "train_time_s": 7.54
   },
   {
     "formulation": "Thermal Predictor + Time (3-feat)",
@@ -171,13 +171,13 @@
     "flash_bytes": 9476,
     "ram_bytes": 512,
     "est_latency_us": 852.0,
-    "test_mae": 2.8744,
-    "test_rmse": 3.6502,
-    "test_r2": 0.9235,
-    "train_mae": 0.1863,
-    "train_r2": 0.9998,
-    "n_iter": 115,
-    "train_time_s": 3.43
+    "test_mae": 0.4901,
+    "test_rmse": 0.8448,
+    "test_r2": 0.9959,
+    "train_mae": 0.1332,
+    "train_r2": 0.9999,
+    "n_iter": 49,
+    "train_time_s": 14.55
   },
   {
     "formulation": "Thermal Predictor + Time (3-feat)",
@@ -198,13 +198,13 @@
     "flash_bytes": 11524,
     "ram_bytes": 512,
     "est_latency_us": 1038.0,
-    "test_mae": 2.9926,
-    "test_rmse": 4.531,
-    "test_r2": 0.8822,
-    "train_mae": 0.177,
-    "train_r2": 0.9998,
-    "n_iter": 156,
-    "train_time_s": 5.38
+    "test_mae": 0.4797,
+    "test_rmse": 0.8036,
+    "test_r2": 0.9963,
+    "train_mae": 0.1415,
+    "train_r2": 0.9999,
+    "n_iter": 54,
+    "train_time_s": 18.16
   },
   {
     "formulation": "Thermal Predictor (2-feat)",
@@ -222,13 +222,13 @@
     "flash_bytes": 132,
     "ram_bytes": 64,
     "est_latency_us": 9.0,
-    "test_mae": 0.1299,
-    "test_rmse": 0.1897,
+    "test_mae": 0.1371,
+    "test_rmse": 0.1918,
     "test_r2": 0.9998,
-    "train_mae": 0.1518,
-    "train_r2": 0.9998,
-    "n_iter": 375,
-    "train_time_s": 2.0
+    "train_mae": 0.1288,
+    "train_r2": 0.9999,
+    "n_iter": 82,
+    "train_time_s": 4.36
   },
   {
     "formulation": "Thermal Predictor (2-feat)",
@@ -246,13 +246,13 @@
     "flash_bytes": 260,
     "ram_bytes": 128,
     "est_latency_us": 18.0,
-    "test_mae": 0.1671,
-    "test_rmse": 0.2074,
+    "test_mae": 0.1447,
+    "test_rmse": 0.1947,
     "test_r2": 0.9998,
-    "train_mae": 0.1393,
+    "train_mae": 0.1341,
     "train_r2": 0.9999,
-    "n_iter": 484,
-    "train_time_s": 2.77
+    "n_iter": 83,
+    "train_time_s": 4.62
   },
   {
     "formulation": "Thermal Predictor (2-feat)",
@@ -270,13 +270,13 @@
     "flash_bytes": 516,
     "ram_bytes": 256,
     "est_latency_us": 36.0,
-    "test_mae": 0.284,
-    "test_rmse": 0.3473,
-    "test_r2": 0.9993,
-    "train_mae": 0.2185,
-    "train_r2": 0.9997,
-    "n_iter": 318,
-    "train_time_s": 2.37
+    "test_mae": 0.1378,
+    "test_rmse": 0.1922,
+    "test_r2": 0.9998,
+    "train_mae": 0.1327,
+    "train_r2": 0.9999,
+    "n_iter": 81,
+    "train_time_s": 5.57
   },
   {
     "formulation": "Thermal Predictor (2-feat)",
@@ -295,13 +295,13 @@
     "flash_bytes": 772,
     "ram_bytes": 128,
     "est_latency_us": 63.0,
-    "test_mae": 0.1846,
-    "test_rmse": 0.2335,
-    "test_r2": 0.9997,
-    "train_mae": 0.1608,
-    "train_r2": 0.9998,
-    "n_iter": 252,
-    "train_time_s": 2.14
+    "test_mae": 0.1504,
+    "test_rmse": 0.2014,
+    "test_r2": 0.9998,
+    "train_mae": 0.1351,
+    "train_r2": 0.9999,
+    "n_iter": 62,
+    "train_time_s": 5.5
   },
   {
     "formulation": "Thermal Predictor (2-feat)",
@@ -320,13 +320,13 @@
     "flash_bytes": 2564,
     "ram_bytes": 256,
     "est_latency_us": 222.0,
-    "test_mae": 0.1793,
-    "test_rmse": 0.2378,
-    "test_r2": 0.9997,
-    "train_mae": 0.1685,
-    "train_r2": 0.9998,
-    "n_iter": 157,
-    "train_time_s": 1.68
+    "test_mae": 0.1533,
+    "test_rmse": 0.1988,
+    "test_r2": 0.9998,
+    "train_mae": 0.1318,
+    "train_r2": 0.9999,
+    "n_iter": 66,
+    "train_time_s": 8.5
   },
   {
     "formulation": "Thermal Predictor (2-feat)",
@@ -346,13 +346,13 @@
     "flash_bytes": 1860,
     "ram_bytes": 128,
     "est_latency_us": 159.0,
-    "test_mae": 0.2114,
-    "test_rmse": 0.2768,
-    "test_r2": 0.9996,
-    "train_mae": 0.1687,
-    "train_r2": 0.9998,
-    "n_iter": 172,
-    "train_time_s": 2.02
+    "test_mae": 0.1401,
+    "test_rmse": 0.1939,
+    "test_r2": 0.9998,
+    "train_mae": 0.1314,
+    "train_r2": 0.9999,
+    "n_iter": 55,
+    "train_time_s": 5.44
   },
   {
     "formulation": "Thermal Predictor (2-feat)",
@@ -371,13 +371,13 @@
     "flash_bytes": 9220,
     "ram_bytes": 512,
     "est_latency_us": 828.0,
-    "test_mae": 0.2932,
-    "test_rmse": 0.3719,
-    "test_r2": 0.9992,
-    "train_mae": 0.1918,
-    "train_r2": 0.9997,
-    "n_iter": 159,
-    "train_time_s": 4.25
+    "test_mae": 0.1541,
+    "test_rmse": 0.199,
+    "test_r2": 0.9998,
+    "train_mae": 0.1379,
+    "train_r2": 0.9999,
+    "n_iter": 53,
+    "train_time_s": 11.5
   },
   {
     "formulation": "Thermal Predictor (2-feat)",
@@ -397,13 +397,13 @@
     "flash_bytes": 11268,
     "ram_bytes": 512,
     "est_latency_us": 1014.0,
-    "test_mae": 0.2379,
-    "test_rmse": 0.3196,
-    "test_r2": 0.9994,
-    "train_mae": 0.1618,
-    "train_r2": 0.9998,
-    "n_iter": 88,
-    "train_time_s": 2.72
+    "test_mae": 0.1429,
+    "test_rmse": 0.1962,
+    "test_r2": 0.9998,
+    "train_mae": 0.1343,
+    "train_r2": 0.9999,
+    "n_iter": 44,
+    "train_time_s": 10.1
   },
   {
     "formulation": "Single Sensor Baseline (1-feat)",
@@ -426,7 +426,7 @@
     "train_mae": 0.1702,
     "train_r2": 0.9997,
     "n_iter": 283,
-    "train_time_s": 1.97
+    "train_time_s": 1.4
   },
   {
     "formulation": "Single Sensor Baseline (1-feat)",
@@ -449,7 +449,7 @@
     "train_mae": 0.166,
     "train_r2": 0.9998,
     "n_iter": 268,
-    "train_time_s": 2.42
+    "train_time_s": 1.48
   },
   {
     "formulation": "Single Sensor Baseline (1-feat)",
@@ -472,7 +472,7 @@
     "train_mae": 0.1679,
     "train_r2": 0.9997,
     "n_iter": 206,
-    "train_time_s": 1.9
+    "train_time_s": 1.46
   },
   {
     "formulation": "Single Sensor Baseline (1-feat)",
@@ -496,7 +496,7 @@
     "train_mae": 0.1429,
     "train_r2": 0.9998,
     "n_iter": 141,
-    "train_time_s": 1.51
+    "train_time_s": 1.17
   },
   {
     "formulation": "Single Sensor Baseline (1-feat)",
@@ -520,7 +520,7 @@
     "train_mae": 42.9352,
     "train_r2": -8.0454,
     "n_iter": 600,
-    "train_time_s": 7.35
+    "train_time_s": 6.73
   },
   {
     "formulation": "Single Sensor Baseline (1-feat)",
@@ -545,7 +545,7 @@
     "train_mae": 0.1773,
     "train_r2": 0.9998,
     "n_iter": 87,
-    "train_time_s": 1.12
+    "train_time_s": 1.08
   },
   {
     "formulation": "Single Sensor Baseline (1-feat)",
@@ -569,7 +569,7 @@
     "train_mae": 0.1834,
     "train_r2": 0.9997,
     "n_iter": 83,
-    "train_time_s": 2.54
+    "train_time_s": 2.49
   },
   {
     "formulation": "Single Sensor Baseline (1-feat)",
@@ -594,6 +594,6 @@
     "train_mae": 0.1422,
     "train_r2": 0.9998,
     "n_iter": 79,
-    "train_time_s": 2.69
+    "train_time_s": 2.94
   }
 ]

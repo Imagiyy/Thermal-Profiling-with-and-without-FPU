@@ -127,6 +127,30 @@ def compute_hw_stats(n_inputs: int, hidden: tuple):
     }
 
 
+def augment_ambient_training_data(df_train: pd.DataFrame) -> pd.DataFrame:
+    """
+    Augments the training data across realistic operating room temperatures [18 °C to 38 °C].
+    In the laboratory dataset, ambient temperature was nearly constant (33.20 ± 0.20 °C),
+    causing StandardScaler to assign an artificially tiny scale (0.20 °C), which causes
+    catastrophic extrapolation spikes when the hardware runs at normal room temp (e.g. 25 °C).
+    
+    Physics: Heat loss rate dT/dt is proportional to (T_hs - T_amb)/tau (tau ~ 208s).
+    Over dt = 1.0s, delta_T = (s / tau) * dt.
+    """
+    tau = 208.0
+    dt = 1.0
+    shifts = [-15.0, -12.0, -9.0, -6.0, -3.0, 0.0, +3.0, +5.0]
+
+    augmented_frames = []
+    for s in shifts:
+        d = df_train.copy()
+        d["ambient_temp_C"] = d["ambient_temp_C"] + s + np.random.normal(0, 0.05, size=len(d))
+        if "temp_future_1s" in d.columns:
+            d["temp_future_1s"] = d["temp_future_1s"] + (s / tau) * dt
+        augmented_frames.append(d)
+    return pd.concat(augmented_frames, ignore_index=True)
+
+
 # ═══════════════════════════════════════════════════════════════════
 # 3. EXPERIMENT EXECUTION (TEMPORAL LEAKAGE-FREE SPLIT)
 # ═══════════════════════════════════════════════════════════════════
@@ -189,11 +213,17 @@ def run_architecture_search(df: pd.DataFrame):
         print(f"  Features: {feats} -> Target: {target}")
         print(f"  ------------------------------------------------------------------")
 
+        # For ambient feature robustness: augment training set across realistic room temperatures
+        if "ambient_temp_C" in feats:
+            effective_train = augment_ambient_training_data(df_train)
+        else:
+            effective_train = df_train
+
         # Scaler fit STRICTLY on train set
         scaler = StandardScaler()
-        X_train_s = scaler.fit_transform(df_train[feats].values)
+        X_train_s = scaler.fit_transform(effective_train[feats].values)
         X_test_s  = scaler.transform(df_test[feats].values)
-        y_train   = df_train[target].values
+        y_train   = effective_train[target].values
         y_test    = df_test[target].values
 
         for arch_name, hidden in ARCHITECTURES.items():
@@ -376,9 +406,14 @@ def train_and_export_best(df: pd.DataFrame, results: list[dict]):
     hidden = tuple(best["hidden"])
     target = best["target"]
 
-    # Full data refit for production deployment
-    X = df[feats].values
-    y = df[target].values
+    # Full data refit for production deployment with ambient robustness
+    if "ambient_temp_C" in feats:
+        df_export_train = augment_ambient_training_data(df)
+    else:
+        df_export_train = df
+
+    X = df_export_train[feats].values
+    y = df_export_train[target].values
 
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
@@ -536,6 +571,14 @@ int32_t mlp_new_predict_temp_cC(int32_t hs_cC, int32_t amb_cC);
     max_width = max(layer_sizes)
     src_lines.append(f"""int32_t mlp_new_predict_temp_cC(int32_t hs_cC, int32_t amb_cC)
 {{
+    /*
+     * Sanity clamp ambient reading to realistic operating room conditions [10 °C, 45 °C].
+     * If BME280 sensor is disconnected or reading <= 0, default to 25 °C (2500 cC).
+     */
+    if (amb_cC <= 1000 || amb_cC >= 5000) {{
+        amb_cC = 2500;
+    }}
+
     /*
      * Feature extraction:
      *   x[0] = heatsink_temp_C = hs_cC  / 100.0f  (centi-°C -> °C)
