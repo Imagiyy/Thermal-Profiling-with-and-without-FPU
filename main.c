@@ -16,9 +16,34 @@
 #include "ml_model/mlp_model.h"
 #endif
 
+#if __has_include("mlp_model_new.h")
+#include "mlp_model_new.h"
+#elif __has_include("New_models/mlp_model_new.h")
+#include "New_models/mlp_model_new.h"
+#endif
+
 #ifndef BENCHMARK_MODE
 #define BENCHMARK_MODE 0
 #endif
+
+/* =========================== MODEL SELECTION ============================== */
+/*
+ * Single variable to control which TinyML model runs:
+ *   MODEL_MLP_ORIGINAL (0) : mlp_model.c     (4 inputs: Ploss, Current, Tamb, Theatsink)
+ *   MODEL_MLP_NEW      (1) : mlp_model_new.c (2 inputs: Theatsink, Tamb -> 1s Lookahead)
+ *
+ * To switch models, change 'active_model' directly below or pass -DACTIVE_MODEL=0 or 1.
+ */
+#define MODEL_MLP_ORIGINAL 0
+#define MODEL_MLP_NEW      1
+
+#ifndef ACTIVE_MODEL
+#define ACTIVE_MODEL       MODEL_MLP_ORIGINAL
+#endif
+
+/* Active model selection variable */
+static volatile uint8_t active_model = ACTIVE_MODEL;
+
 
 /* =========================== USER CONFIGURATION =========================== */
 #define SAMPLE_PERIOD_MS   500U
@@ -38,6 +63,16 @@
 #define SPI_TIMEOUT_MS     5U
 #define ADC_TIMEOUT_MS     5U
 
+/* ======================== MOSFET POWER CUTOFF ============================= */
+/* STM32 Nucleo-64 Pin: PA8 (Arduino Digital Header D7, CN9 Pin 1)
+ * High-Side / Active-High Drive: 1 = Power ON (Normal), 0 = Cutoff (Trip >= 90 °C)
+ */
+#define MOSFET_GPIO_PORT           GPIOA
+#define MOSFET_PIN                 8U
+#define MOSFET_ACTIVE_HIGH         1U
+#define THERMAL_SHUTDOWN_THRESHOLD 9000  /* Disconnect at >= 90.0 °C (9000 cC) */
+#define THERMAL_RECOVERY_THRESHOLD 8000  /* Reconnect when cooled below 80.0 °C (hysteresis) */
+
 /* fault bits */
 #define F_INA219           0x01U
 #define F_BME280           0x02U
@@ -46,6 +81,7 @@
 #define F_TC_SCV           0x10U
 #define F_MAX_COMM         0x20U
 #define F_ADC              0x40U
+#define F_THERMAL_TRIP     0x80U
 
 /* ============================= TINYML INFERENCE =========================== */
 __attribute__((weak)) void mlp_reset_timebase(void)
@@ -56,6 +92,12 @@ __attribute__((weak)) int32_t cnn_predict_temp_cC(int32_t ploss_cmW, int32_t i_c
 {
     (void)ploss_cmW;
     (void)i_cmA;
+    (void)amb_cC;
+    return hs_cC;
+}
+
+__attribute__((weak)) int32_t mlp_new_predict_temp_cC(int32_t hs_cC, int32_t amb_cC)
+{
     (void)amb_cC;
     return hs_cC;
 }
@@ -115,6 +157,24 @@ static void gpio_af(GPIO_TypeDef *g, uint32_t pin, uint32_t af)
     gpio_mode(g, pin, 2U);
 }
 
+static inline void mosfet_power_on(void)
+{
+#if MOSFET_ACTIVE_HIGH
+    MOSFET_GPIO_PORT->BSRR = (1U << MOSFET_PIN);
+#else
+    MOSFET_GPIO_PORT->BSRR = (1U << (MOSFET_PIN + 16U));
+#endif
+}
+
+static inline void mosfet_power_off(void)
+{
+#if MOSFET_ACTIVE_HIGH
+    MOSFET_GPIO_PORT->BSRR = (1U << (MOSFET_PIN + 16U));
+#else
+    MOSFET_GPIO_PORT->BSRR = (1U << MOSFET_PIN);
+#endif
+}
+
 static void gpio_init(void)
 {
     RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN | RCC_AHB1ENR_GPIOBEN;
@@ -139,6 +199,15 @@ static void gpio_init(void)
     gpio_speed_high(GPIOB, 9U);
     gpio_af(GPIOB, 8U, 4U);
     gpio_af(GPIOB, 9U, 4U);
+
+    /* MOSFET power cutoff gate control: PA8 (Arduino D7) */
+    gpio_mode(MOSFET_GPIO_PORT, MOSFET_PIN, 1U); /* General purpose output */
+    gpio_speed_high(MOSFET_GPIO_PORT, MOSFET_PIN);
+#if MOSFET_ACTIVE_HIGH
+    MOSFET_GPIO_PORT->BSRR = (1U << MOSFET_PIN); /* Power ON by default */
+#else
+    MOSFET_GPIO_PORT->BSRR = (1U << (MOSFET_PIN + 16U)); /* Power ON by default */
+#endif
 }
 
 /* ================================== UART ================================== */
@@ -551,7 +620,7 @@ static int adc1_read_vout_mV(int32_t *vout_mV)
 /* ==================================== MAIN ================================ */
 int main(void)
 {
-#if (defined(BENCHMARK_MODE) && (BENCHMARK_MODE == 0 || BENCHMARK_MODE == 3))
+#if (ACTIVE_MODEL == MODEL_MLP_NEW || (defined(BENCHMARK_MODE) && (BENCHMARK_MODE == 0 || BENCHMARK_MODE == 3)))
     /* Hardware FPU enabled: Grant CP10 & CP11 Full Access */
     SCB->CPACR |= ((3UL << 20) | (3UL << 22));
 #else
@@ -560,6 +629,13 @@ int main(void)
 #endif
     __DSB();
     __ISB();
+
+    /* Runtime guarantee: if active_model is set to MODEL_MLP_NEW, enable hardware FPU */
+    if (active_model == MODEL_MLP_NEW) {
+        SCB->CPACR |= ((3UL << 20) | (3UL << 22));
+        __DSB();
+        __ISB();
+    }
 
     clock_init();
     gpio_init();
@@ -571,19 +647,24 @@ int main(void)
     adc1_init();
 
     uart_puts("# Project ThermoGuard (STM32F401RE Bare-Metal TinyML)\r\n");
+    if (active_model == MODEL_MLP_NEW) {
+        uart_puts("# Active Model: mlp_model_new (Thermal Lookahead Predictor)\r\n");
+    } else {
+        uart_puts("# Active Model: mlp_model (Virtual Sensor)\r\n");
 #if (BENCHMARK_MODE == 0)
-    uart_puts("# Active: Mode 0 (32-bit Float + Hardware FPU)\r\n");
+        uart_puts("# Active: Mode 0 (32-bit Float + Hardware FPU)\r\n");
 #elif (BENCHMARK_MODE == 1)
-    uart_puts("# Active: Mode 1 (32-bit Int Without FPU - Normal Division)\r\n");
+        uart_puts("# Active: Mode 1 (32-bit Int Without FPU - Normal Division)\r\n");
 #elif (BENCHMARK_MODE == 2)
-    uart_puts("# Active: Mode 2 (32-bit Int Without FPU - PoT Bit-Shift)\r\n");
+        uart_puts("# Active: Mode 2 (32-bit Int Without FPU - PoT Bit-Shift)\r\n");
 #elif (BENCHMARK_MODE == 3)
-    uart_puts("# Active: Mode 3 (16-bit Float + Hardware FPU)\r\n");
+        uart_puts("# Active: Mode 3 (16-bit Float + Hardware FPU)\r\n");
 #elif (BENCHMARK_MODE == 4)
-    uart_puts("# Active: Mode 4 (16-bit Int Without FPU - Normal Division)\r\n");
+        uart_puts("# Active: Mode 4 (16-bit Int Without FPU - Normal Division)\r\n");
 #elif (BENCHMARK_MODE == 5)
-    uart_puts("# Active: Mode 5 (16-bit Int Without FPU - PoT + ARM SMLAD SIMD)\r\n");
+        uart_puts("# Active: Mode 5 (16-bit Int Without FPU - PoT + ARM SMLAD SIMD)\r\n");
 #endif
+    }
     if (ina219_init())  uart_puts("# WARN: INA219 not responding\r\n");
     if (bme280_init())  uart_puts("# WARN: BME280/BMP280 not responding\r\n");
 
@@ -655,6 +736,25 @@ int main(void)
             }
         }
 
+        /* Automated thermal cutoff protection:
+         * Disconnects power source when heatsink temperature reaches >= 90.0 °C.
+         * Reconnects when cooled down below 80.0 °C (hysteresis). */
+        static uint8_t s_thermal_tripped = 0U;
+
+        if (hs_cC >= THERMAL_SHUTDOWN_THRESHOLD) {
+            if (!s_thermal_tripped) {
+                s_thermal_tripped = 1U;
+                mosfet_power_off();
+            }
+        } else if (s_thermal_tripped && (hs_cC < THERMAL_RECOVERY_THRESHOLD)) {
+            s_thermal_tripped = 0U;
+            mosfet_power_on();
+        }
+
+        if (s_thermal_tripped) {
+            fault |= F_THERMAL_TRIP;
+        }
+
         /* Persistent thermal prediction state (for smooth passive cooling decay) */
         static int32_t s_pred_cC = 0;
 
@@ -692,7 +792,11 @@ int main(void)
 
             /* Benchmark TinyML inference latency via DWT */
             uint32_t t_start = DWT->CYCCNT;
-            pred_cC = cnn_predict_temp_cC(ploss_cmW, i_cmA, amb_cC, hs_cC);
+            if (active_model == MODEL_MLP_NEW) {
+                pred_cC = mlp_new_predict_temp_cC(hs_cC, amb_cC);
+            } else {
+                pred_cC = cnn_predict_temp_cC(ploss_cmW, i_cmA, amb_cC, hs_cC);
+            }
             uint32_t infer_cycles = DWT->CYCCNT - t_start;
             infer_us = infer_cycles / 16U; /* 16 MHz HSI: 16 cycles = 1 us */
 
