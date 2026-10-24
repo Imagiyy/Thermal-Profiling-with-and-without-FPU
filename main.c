@@ -651,20 +651,20 @@ int main(void)
         uart_puts("# Active Model: mlp_model_new (Thermal Lookahead Predictor)\r\n");
     } else {
         uart_puts("# Active Model: mlp_model (Virtual Sensor)\r\n");
-#if (BENCHMARK_MODE == 0)
-        uart_puts("# Active: Mode 0 (32-bit Float + Hardware FPU)\r\n");
-#elif (BENCHMARK_MODE == 1)
-        uart_puts("# Active: Mode 1 (32-bit Int Without FPU - Normal Division)\r\n");
-#elif (BENCHMARK_MODE == 2)
-        uart_puts("# Active: Mode 2 (32-bit Int Without FPU - PoT Bit-Shift)\r\n");
-#elif (BENCHMARK_MODE == 3)
-        uart_puts("# Active: Mode 3 (16-bit Float + Hardware FPU)\r\n");
-#elif (BENCHMARK_MODE == 4)
-        uart_puts("# Active: Mode 4 (16-bit Int Without FPU - Normal Division)\r\n");
-#elif (BENCHMARK_MODE == 5)
-        uart_puts("# Active: Mode 5 (16-bit Int Without FPU - PoT + ARM SMLAD SIMD)\r\n");
-#endif
     }
+#if (BENCHMARK_MODE == 0)
+    uart_puts("# Active: Mode 0 (32-bit Float + Hardware FPU)\r\n");
+#elif (BENCHMARK_MODE == 1)
+    uart_puts("# Active: Mode 1 (32-bit Int Without FPU - Normal Division)\r\n");
+#elif (BENCHMARK_MODE == 2)
+    uart_puts("# Active: Mode 2 (32-bit Int Without FPU - PoT Bit-Shift)\r\n");
+#elif (BENCHMARK_MODE == 3)
+    uart_puts("# Active: Mode 3 (16-bit Float + Hardware FPU)\r\n");
+#elif (BENCHMARK_MODE == 4)
+    uart_puts("# Active: Mode 4 (16-bit Int Without FPU - Normal Division)\r\n");
+#elif (BENCHMARK_MODE == 5)
+    uart_puts("# Active: Mode 5 (16-bit Int Without FPU - PoT + ARM SMLAD SIMD)\r\n");
+#endif
     if (ina219_init())  uart_puts("# WARN: INA219 not responding\r\n");
     if (bme280_init())  uart_puts("# WARN: BME280/BMP280 not responding\r\n");
 

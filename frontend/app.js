@@ -467,6 +467,12 @@ function filterTempGlitch(type, val, threshold = 10.0, maxPoints = 2) {
       if (val > 0) cleanTpred = val;
       return val;
     }
+    // If t_pred is actively closing the gap towards measured heatsink temp, accept immediately
+    if (cleanTmeas !== null && cleanTpred < cleanTmeas && val > cleanTpred && val <= (cleanTmeas + 2.0)) {
+      cleanTpred = val;
+      predGlitchCount = 0;
+      return val;
+    }
     const isGlitch = (val <= 0) || Math.abs(val - cleanTpred) >= threshold;
     if (isGlitch) {
       predGlitchCount++;

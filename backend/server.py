@@ -175,19 +175,25 @@ class TelemetryState:
                     self.clean_t_pred = t_pred
                 out_pred = t_pred
             else:
-                is_pred_glitch = (t_pred <= 0.0) or (abs(t_pred - self.clean_t_pred) >= 10.0)
-                if is_pred_glitch:
-                    self.pred_glitch_cnt += 1
-                    if self.pred_glitch_cnt <= 2:
-                        out_pred = self.clean_t_pred  # Freeze display to last stable reading
+                # If t_pred is actively closing the gap towards measured heatsink temp, accept immediately
+                if self.clean_t_meas is not None and self.clean_t_pred < self.clean_t_meas and t_pred > self.clean_t_pred and t_pred <= (self.clean_t_meas + 2.0):
+                    self.clean_t_pred = t_pred
+                    self.pred_glitch_cnt = 0
+                    out_pred = t_pred
+                else:
+                    is_pred_glitch = (t_pred <= 0.0) or (abs(t_pred - self.clean_t_pred) >= 10.0)
+                    if is_pred_glitch:
+                        self.pred_glitch_cnt += 1
+                        if self.pred_glitch_cnt <= 2:
+                            out_pred = self.clean_t_pred  # Freeze display to last stable reading
+                        else:
+                            self.clean_t_pred = t_pred
+                            self.pred_glitch_cnt = 0
+                            out_pred = t_pred
                     else:
                         self.clean_t_pred = t_pred
                         self.pred_glitch_cnt = 0
                         out_pred = t_pred
-                else:
-                    self.clean_t_pred = t_pred
-                    self.pred_glitch_cnt = 0
-                    out_pred = t_pred
 
             return round(out_meas, 2), round(out_pred, 2)
 
