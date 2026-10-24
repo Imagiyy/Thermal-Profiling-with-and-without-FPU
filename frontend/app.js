@@ -202,7 +202,8 @@ const thermalChart = new Chart(thermalCtx, {
         fill: false,
       },
       {
-        label: "T predicted (°C)",
+        // [10s Prediction]: label: "T predicted (made 10 s earlier)",
+        label: "T predicted (made 1 s earlier)",
         data: [],
         borderColor: CHART_COLORS.predicted,
         backgroundColor: "rgba(163,230,53,.08)",

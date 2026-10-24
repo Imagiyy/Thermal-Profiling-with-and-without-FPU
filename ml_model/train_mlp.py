@@ -92,6 +92,17 @@ def load_clean_datasets() -> tuple[pd.DataFrame, pd.DataFrame]:
         df_clean['elapsed_min'] = (df_clean['timestamp_ms'] - t0) / 60000.0
         df_clean['source'] = src
 
+        # ----------------------------------------------------------------------
+        # FORECAST HORIZON (Sampling interval = 500 ms):
+        # ----------------------------------------------------------------------
+        # [10s Prediction Horizon] (20 samples ahead):
+        # df_clean['target_temp_C'] = df_clean['heatsink_temp_C'].shift(-20)
+        #
+        # [1s Prediction Horizon] (2 samples ahead = 1.0 s into the future):
+        df_clean['target_temp_C'] = df_clean['heatsink_temp_C'].shift(-2)
+        df_clean = df_clean.dropna(subset=['target_temp_C']).copy()
+        df_clean['delta_T'] = df_clean['target_temp_C'] - df_clean['ambient_temp_C']
+
         # Strict Temporal Split: First 80% train, last 20% test
         n_total = len(df_clean)
         cutoff = int(n_total * 0.80)
@@ -109,11 +120,51 @@ def load_clean_datasets() -> tuple[pd.DataFrame, pd.DataFrame]:
     df_train = pd.concat(train_frames, ignore_index=True)
     df_test  = pd.concat(test_frames, ignore_index=True)
 
-    print(f"\n  Final Train Partition: {len(df_train)} samples (Strictly first 80% time)")
-    print(f"  Final Test Partition:  {len(df_test)} samples (Strictly unseen future time)")
+    # -------------------------------------------------------------------------
+    # ZERO-LEAKAGE PHYSICS-INFORMED AMBIENT AUGMENTATION (STRICTLY ON TRAIN ONLY):
+    #
+    # The physical heatsink temperature follows Newton's Law / Fourier Conduction:
+    #     T_heatsink(t) = T_ambient + Delta_T(t)
+    # where Delta_T depends purely on electrical power dissipation P_loss and time.
+    # In the raw laboratory dataset, ambient temperature was static (33.18 ± 0.21 °C),
+    # causing naive regressors to fail when operated in cooler rooms (< 33 °C).
+    #
+    # To enable generalization from 15 °C up to 125 °C without data leakage:
+    # 1. We augment df_train with ambient temperature shifts [-15, -10, -5, 0, +5, +10] °C
+    #    while keeping Delta_T invariant (Delta_T = P * R_theta).
+    # 2. We add synthetic zero-power standby anchor samples (P=0, I=0, Delta_T=0)
+    #    across the full ambient operating range [15 °C .. 45 °C].
+    #
+    # The holdout test set (df_test) is NEVER augmented to guarantee 100% rigorous validation.
+    # -------------------------------------------------------------------------
+    standby_rows = []
+    for amb in np.linspace(15.0, 45.0, 31):
+        for el in np.linspace(0.0, 25.0, 15):
+            standby_rows.append({
+                'power_loss_mW': 0.0,
+                'current_mA': 0.0,
+                'ambient_temp_C': amb,
+                'elapsed_min': el,
+                'delta_T': 0.0,
+                'target_temp_C': amb,
+                'source': 'standby_anchor'
+            })
+    df_standby = pd.DataFrame(standby_rows)
+
+    aug_train_list = [df_standby]
+    for shift in [-15.0, -10.0, -5.0, 0.0, 5.0, 10.0]:
+        df_aug = df_train.copy()
+        df_aug['ambient_temp_C'] += shift
+        df_aug['target_temp_C'] = df_aug['ambient_temp_C'] + df_aug['delta_T']
+        aug_train_list.append(df_aug)
+
+    df_train_aug = pd.concat(aug_train_list, ignore_index=True)
+
+    print(f"\n  Final Train Partition: {len(df_train_aug)} samples (Strictly first 80% time + Physics Augmentation)")
+    print(f"  Final Test Partition:  {len(df_test)} samples (Strictly unseen future time, unaugmented)")
     print("  Zero temporal overlap. Zero adjacent thermal leakage.")
 
-    return df_train, df_test
+    return df_train_aug, df_test
 
 # ──────────────────────── 2. Train Model ──────────────────────────
 def train_zero_leakage_mlp(
@@ -160,31 +211,42 @@ def evaluate_and_plot(
 
     X_train_s = scaler.transform(df_train[feature_cols].values)
     X_test_s  = scaler.transform(df_test[feature_cols].values)
-    y_train   = df_train[target_col].values
-    y_test    = df_test[target_col].values
+    y_train_delta = df_train[target_col].values
+    y_test_delta  = df_test[target_col].values
 
-    y_pred_train = mlp.predict(X_train_s)
-    y_pred_test  = mlp.predict(X_test_s)
+    y_pred_train_delta = mlp.predict(X_train_s)
+    y_pred_test_delta  = mlp.predict(X_test_s)
+
+    # Reconstruct physical heatsink temperatures: T_pred = T_ambient + Delta_T
+    y_pred_train_temp = df_train['ambient_temp_C'].values + y_pred_train_delta
+    y_pred_test_temp  = df_test['ambient_temp_C'].values + y_pred_test_delta
+    y_true_train_temp = df_train['target_temp_C'].values
+    y_true_test_temp  = df_test['target_temp_C'].values
+
+    # Physical Bounds: a heatsink cannot be cooler than ambient or exceed KA7808 max
+    y_pred_train_temp = np.clip(y_pred_train_temp, df_train['ambient_temp_C'].values, 125.0)
+    y_pred_test_temp  = np.clip(y_pred_test_temp, df_test['ambient_temp_C'].values, 125.0)
 
     metrics = {
         "zero_leakage_guarantee": {
             "temporal_split": "First 80% train, unseen last 20% test per continuous load dataset",
             "embargo_gap_seconds": 15,
             "scaler_policy": "Fitted strictly on df_train; only transform() called on df_test",
+            "physics_formulation": "Temperature Rise Delta_T = T_heatsink - T_ambient with Standby Anchors",
             "dropped_datasets": ["zeroinput.csv"],
             "dropped_columns": ["predicted_temp_C"]
         },
         "train": {
-            "MAE":  float(mean_absolute_error(y_train, y_pred_train)),
-            "RMSE": float(np.sqrt(mean_squared_error(y_train, y_pred_train))),
-            "R2":   float(r2_score(y_train, y_pred_train)),
-            "samples": len(y_train)
+            "MAE":  float(mean_absolute_error(y_true_train_temp, y_pred_train_temp)),
+            "RMSE": float(np.sqrt(mean_squared_error(y_true_train_temp, y_pred_train_temp))),
+            "R2":   float(r2_score(y_true_train_temp, y_pred_train_temp)),
+            "samples": len(y_true_train_temp)
         },
         "holdout_test": {
-            "MAE":  float(mean_absolute_error(y_test, y_pred_test)),
-            "RMSE": float(np.sqrt(mean_squared_error(y_test, y_pred_test))),
-            "R2":   float(r2_score(y_test, y_pred_test)),
-            "samples": len(y_test)
+            "MAE":  float(mean_absolute_error(y_true_test_temp, y_pred_test_temp)),
+            "RMSE": float(np.sqrt(mean_squared_error(y_true_test_temp, y_pred_test_temp))),
+            "R2":   float(r2_score(y_true_test_temp, y_pred_test_temp)),
+            "samples": len(y_true_test_temp)
         }
     }
 
@@ -194,12 +256,12 @@ def evaluate_and_plot(
 
     # Generate Report Plot
     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-    fig.suptitle("Zero-Leakage TinyML Thermal Prediction Report", fontsize=15, fontweight="bold")
+    fig.suptitle("Zero-Leakage TinyML Thermal Prediction Report (Physics-Informed Delta-T)", fontsize=15, fontweight="bold")
 
     # (a) Actual vs Predicted (Holdout Test)
     ax = axes[0, 0]
-    ax.scatter(y_test, y_pred_test, alpha=0.5, s=12, c="#1E88E5", edgecolors="none")
-    mn, mx = min(y_test.min(), y_pred_test.min()), max(y_test.max(), y_pred_test.max())
+    ax.scatter(y_true_test_temp, y_pred_test_temp, alpha=0.5, s=12, c="#1E88E5", edgecolors="none")
+    mn, mx = min(y_true_test_temp.min(), y_pred_test_temp.min()), max(y_true_test_temp.max(), y_pred_test_temp.max())
     ax.plot([mn, mx], [mn, mx], "r--", lw=1.8, label="Ideal 1:1")
     ax.set_xlabel("Actual Heatsink Temp (°C)")
     ax.set_ylabel("Predicted Heatsink Temp (°C)")
@@ -209,7 +271,7 @@ def evaluate_and_plot(
 
     # (b) Residual Histogram
     ax = axes[0, 1]
-    residuals = y_test - y_pred_test
+    residuals = y_true_test_temp - y_pred_test_temp
     ax.hist(residuals, bins=40, color="#43A047", edgecolor="white", alpha=0.85)
     ax.axvline(0, color="red", linestyle="--", lw=1.5)
     ax.set_xlabel("Residual Error (°C)")
@@ -228,11 +290,11 @@ def evaluate_and_plot(
 
     # (d) Sequential Tracking over Unseen Future Time
     ax = axes[1, 1]
-    n_plot = min(400, len(y_test))
+    n_plot = min(400, len(y_true_test_temp))
     idx = np.arange(n_plot)
-    ax.plot(idx, y_test[:n_plot], label="Actual (°C)", color="#1E88E5", lw=1.5)
-    ax.plot(idx, y_pred_test[:n_plot], label="Predicted (°C)", color="#FB8C00", lw=1.5, alpha=0.9)
-    ax.fill_between(idx, y_test[:n_plot], y_pred_test[:n_plot], alpha=0.2, color="#E53935")
+    ax.plot(idx, y_true_test_temp[:n_plot], label="Actual (°C)", color="#1E88E5", lw=1.5)
+    ax.plot(idx, y_pred_test_temp[:n_plot], label="Predicted (°C)", color="#FB8C00", lw=1.5, alpha=0.9)
+    ax.fill_between(idx, y_true_test_temp[:n_plot], y_pred_test_temp[:n_plot], alpha=0.2, color="#E53935")
     ax.set_xlabel("Sample Index in Unseen Future")
     ax.set_ylabel("Heatsink Temp (°C)")
     ax.set_title("Tracking Unseen Future Horizon (First 400 Samples)")
@@ -535,7 +597,15 @@ int32_t cnn_predict_temp_cC(int32_t ploss_cmW, int32_t i_cmA, int32_t amb_cC, in
         out += h[k] * W1_f32[k];
     }}
 
-    return (int32_t)(out * 100.0f);
+    int32_t delta_cC = (int32_t)(out * 100.0f);
+    int32_t final_cC = amb_cC + delta_cC;
+    if (final_cC < amb_cC) {{
+        final_cC = amb_cC;
+    }}
+    if (final_cC > 12500) {{
+        final_cC = 12500;
+    }}
+    return final_cC;
 }}
 
 /* ==============================================================================
@@ -602,7 +672,15 @@ int32_t cnn_predict_temp_cC(int32_t ploss_cmW, int32_t i_cmA, int32_t amb_cC, in
     }}
     out_acc /= SCALE_NORMAL_32;
 
-    return (int32_t)((out_acc * 100LL) / SCALE_NORMAL_32);
+    int32_t delta_cC = (int32_t)((out_acc * 100LL) / SCALE_NORMAL_32);
+    int32_t final_cC = amb_cC + delta_cC;
+    if (final_cC < amb_cC) {{
+        final_cC = amb_cC;
+    }}
+    if (final_cC > 12500) {{
+        final_cC = 12500;
+    }}
+    return final_cC;
 }}
 
 /* ==============================================================================
@@ -669,7 +747,15 @@ int32_t cnn_predict_temp_cC(int32_t ploss_cmW, int32_t i_cmA, int32_t amb_cC, in
     }}
     out_acc >>= SHIFT_POT_32;
 
-    return (int32_t)(((int64_t)out_acc * 100LL) >> SHIFT_POT_32);
+    int32_t delta_cC = (int32_t)(((int64_t)out_acc * 100LL) >> SHIFT_POT_32);
+    int32_t final_cC = amb_cC + delta_cC;
+    if (final_cC < amb_cC) {{
+        final_cC = amb_cC;
+    }}
+    if (final_cC > 12500) {{
+        final_cC = 12500;
+    }}
+    return final_cC;
 }}
 
 /* ==============================================================================
@@ -702,9 +788,12 @@ static inline float fp16_to_fp32(uint16_t h)
         f = sign | ((exp + (127 - 15)) << 23) | (mant << 13);
     }}
 
-    float result;
-    *((uint32_t *)(void *)&result) = f;
-    return result;
+    union {{
+        uint32_t u;
+        float f;
+    }} conv;
+    conv.u = f;
+    return conv.f;
 }}
 
 static const float f32_mean[4] = {{
@@ -756,7 +845,15 @@ int32_t cnn_predict_temp_cC(int32_t ploss_cmW, int32_t i_cmA, int32_t amb_cC, in
         out += h[k] * fp16_to_fp32(W1_f16[k]);
     }}
 
-    return (int32_t)(out * 100.0f);
+    int32_t delta_cC = (int32_t)(out * 100.0f);
+    int32_t final_cC = amb_cC + delta_cC;
+    if (final_cC < amb_cC) {{
+        final_cC = amb_cC;
+    }}
+    if (final_cC > 12500) {{
+        final_cC = 12500;
+    }}
+    return final_cC;
 }}
 
 /* ==============================================================================
@@ -823,7 +920,15 @@ int32_t cnn_predict_temp_cC(int32_t ploss_cmW, int32_t i_cmA, int32_t amb_cC, in
     }}
     out_acc /= SCALE_NORMAL_16;
 
-    return (int32_t)(((int32_t)out_acc * 100) / SCALE_NORMAL_16);
+    int32_t delta_cC = (int32_t)(((int32_t)out_acc * 100) / SCALE_NORMAL_16);
+    int32_t final_cC = amb_cC + delta_cC;
+    if (final_cC < amb_cC) {{
+        final_cC = amb_cC;
+    }}
+    if (final_cC > 12500) {{
+        final_cC = 12500;
+    }}
+    return final_cC;
 }}
 
 /* ==============================================================================
@@ -915,7 +1020,15 @@ int32_t cnn_predict_temp_cC(int32_t ploss_cmW, int32_t i_cmA, int32_t amb_cC, in
     }}
     out_acc >>= SHIFT_POT_16;
 
-    return (int32_t)(((int32_t)out_acc * 100) >> SHIFT_POT_16);
+    int32_t delta_cC = (int32_t)(((int32_t)out_acc * 100) >> SHIFT_POT_16);
+    int32_t final_cC = amb_cC + delta_cC;
+    if (final_cC < amb_cC) {{
+        final_cC = amb_cC;
+    }}
+    if (final_cC > 12500) {{
+        final_cC = 12500;
+    }}
+    return final_cC;
 }}
 
 #endif
@@ -937,7 +1050,9 @@ def main():
     df_train, df_test = load_clean_datasets()
 
     feature_cols = ['power_loss_mW', 'current_mA', 'ambient_temp_C', 'elapsed_min']
-    target_col   = 'heatsink_temp_C'
+    # [10s Prediction Target]: target_col = 'target_10s_temp_C' (commented out)
+    # [1s Prediction Target]: Physics-informed Temperature Rise Delta_T
+    target_col   = 'delta_T'
 
     # 2. Scaler fit STRICTLY ON TRAIN ONLY
     scaler = StandardScaler()

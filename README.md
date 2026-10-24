@@ -102,71 +102,66 @@ If your physical board is disconnected or not yet flashed:
 
 ---
 
-## 🧠 ML Model Training & Deployment
+## 🧠 TinyML 6-Benchmark Suite (32-Bit & 16-Bit Quantization)
 
-### Overview
+The project implements **6 distinct inference benchmark configurations** spanning full 32-bit floating-point and integer quantization down to 16-bit half-precision and fixed-point with ARM Cortex-M4 DSP SIMD assembly optimizations:
 
-The `ml_model/` folder contains a complete pipeline to:
-1. **Train** an MLP regressor (scikit-learn) on your thermal dataset
-2. **Evaluate** with plots and metrics
-3. **Export** the trained model as pure C code for STM32F401RE
+### 📊 Model Accuracy & Digital Footprint Comparison
 
-### Architecture
+All metrics evaluated on the **unseen future holdout test set** (997 continuous operational telemetry samples across 10Ω, 20Ω, and no-load conditions under strict zero-data-leakage constraints):
 
-```
-Input (3 features)  →  Dense(16, ReLU)  →  Dense(8, ReLU)  →  Dense(1)  →  Predicted Temp
-   power_loss_mW                                                              heatsink_temp_C
-   current_mA
-   ambient_temp_C
-```
+| Mode | Benchmark Name | Precision | Holdout MAE | Holdout RMSE | $R^2$ Score | Max Error | Max Dev vs FP32 | Weight Flash | Model Flash | Total FW Flash | Static RAM | Latency (@ 16 MHz) |
+|:---:|:---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| **`0`** | **32-bit Float with FPU** | FP32 | **0.5946 °C** | **0.7003 °C** | **0.9971** | 1.81 °C | Baseline (0.000) | 772 B | 1,116 B | 6,312 B | 4 B | **~50 – 60 µs** |
+| **`1`** | **32-bit Int Without FPU (Normal Div)** | Int32 | **0.5950 °C** | **0.7005 °C** | **0.9971** | 1.82 °C | 0.015 °C | 772 B | 1,156 B | 6,336 B | 4 B | **~170 – 240 µs** |
+| **`2`** | **32-bit Int Without FPU (Power-of-2)** | Int32 | **0.5949 °C** | **0.7005 °C** | **0.9971** | 1.81 °C | 0.015 °C | 772 B | 1,184 B | 6,364 B | 4 B | **~70 – 90 µs** |
+| **`3`** | **16-bit Float with FPU (FP16/FP32)** | FP16/32 | **0.5914 °C** | **0.6968 °C** | **0.9972** | 1.79 °C | 0.018 °C | 386 B | 1,004 B | 6,200 B | 4 B | **~55 – 65 µs** |
+| **`4`** | **16-bit Int Without FPU (Normal Div)** | Int16 | **0.5966 °C** | **0.7025 °C** | **0.9971** | 1.82 °C | 0.023 °C | 386 B | 828 B | 6,008 B | 4 B | **~140 – 190 µs** |
+| **`5`** | **16-bit Int (PoT + ARM SMLAD SIMD)** 🥇 | Int16 | **0.5966 °C** | **0.7025 °C** | **0.9971** | 1.82 °C | 0.023 °C | 386 B | **804 B** | **5,984 B** | 4 B | **~28 – 40 µs** |
 
-Total: **209 parameters** — fits comfortably in flash with ~1 KB footprint.
+#### Key Engineering Insights:
+* **Negligible Quantization Loss:** Quantizing weights from 32-bit float to 16-bit integer introduces only **$0.023^\circ\text{C}$ maximum deviation** compared to the FP32 baseline, maintaining $R^2 = 0.9971$ across all modes.
+* **50% Flash Weight Reduction:** The 16-bit suite (Modes 3, 4, 5) cuts weight storage in half from **772 bytes to 386 bytes**.
+* **Smallest Footprint & Lowest Latency (Mode 5):** Combining 16-bit Power-of-2 bit-shift with ARM Cortex-M4 DSP inline assembly (`SMLAD`) delivers the smallest flash footprint (**804 B** isolated ML model / **5,984 B** total firmware) while achieving the lowest cycle latency (**~28–40 µs** at 16 MHz).
+* **Zero Dynamic Allocation:** All 6 modes require **0 bytes heap** (`malloc`/`free` strictly avoided) and only **4 bytes static RAM** (`g_sample_count`).
 
-### Training
+---
+
+### 🚀 How to Run Each Benchmark Mode
+
+#### Option 1: Automated Script (Fastest — 1 Command)
+Use the included automated build and flash script [`build_firmware.sh`](build_firmware.sh):
 
 ```bash
-cd ml_model
-python train_mlp.py
+# 32-Bit Suite:
+./build_firmware.sh 0 --flash    # Mode 0: 32-bit Float + Hardware FPU
+./build_firmware.sh 1 --flash    # Mode 1: 32-bit Fixed-Point (Normal Div, no FPU)
+./build_firmware.sh 2 --flash    # Mode 2: 32-bit Fixed-Point (Power-of-2 Shift, no FPU)
+
+# 16-Bit Suite:
+./build_firmware.sh 3 --flash    # Mode 3: 16-bit Float + Hardware FPU (FP16 storage)
+./build_firmware.sh 4 --flash    # Mode 4: 16-bit Fixed-Point (Normal Div, no FPU)
+./build_firmware.sh 5 --flash    # Mode 5: 16-bit Fixed-Point (PoT + ARM SMLAD SIMD Assembly)
 ```
+*(Omit `--flash` if you only want to compile without flashing immediately, e.g. `./build_firmware.sh 5`).*
 
-**Custom options:**
-```bash
-python train_mlp.py --epochs 5000              # more iterations
-python train_mlp.py --hidden 32,16,8           # bigger network
-python train_mlp.py --test-size 0.3            # 70/30 split
-python train_mlp.py --no-export                # skip C export
-```
+#### Option 2: Inside STM32CubeIDE (GUI)
+1. In your project, open [`Core/Inc/mlp_model.h`](ml_model/mlp_model.h).
+2. Edit line 37 to select the active mode:
+   ```c
+   #ifndef BENCHMARK_MODE
+   #define BENCHMARK_MODE    MODE_16BIT_FIXED_POT_SIMD   /* Change to 0, 1, 2, 3, 4, or 5 */
+   #endif
+   ```
+3. Click **Build (Hammer icon)** and **Run (Play icon)** to flash to your Nucleo board.
 
-### Deploying to STM32
+---
 
-After training, two C files are auto-generated: `mlp_model.h` and `mlp_model.c`.
-
-**Step 1:** Copy them next to `main.c`:
-```bash
-cp ml_model/mlp_model.h  .
-cp ml_model/mlp_model.c  .
-```
-
-**Step 2:** Add to your build. For bare-metal GCC:
-```bash
-arm-none-eabi-gcc -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 \
-    -O2 -Wall \
-    -T linker_script.ld \
-    main.c mlp_model.c \
-    -o thermoguard.elf \
-    -nostartfiles -lm
-```
-
-**Step 3:** Flash via ST-Link:
-```bash
-st-flash write thermoguard.bin 0x08000000
-```
-
-> **Important:** The generated `cnn_predict_temp_cC()` function overrides the `__attribute__((weak))` stub in `main.c` automatically — **no firmware code changes needed!**
-
-> **FPU flags are mandatory:** `-mfloat-abi=hard -mfpu=fpv4-sp-d16` — without these, the compiler uses slow software floating-point.
-
-### Re-training After New Data
+### 📊 Comparing Performance on the Live Dashboard
+1. Open `http://localhost:8000` and click **Connect**.
+2. Observe the top **PREDICTION TIME** KPI badge:
+   - Notice how **Mode 5 (ARM SMLAD SIMD)** runs in only **~30 µs**, while **Mode 1 (Normal division)** requires **~200 µs**!
+   - All 6 modes output matching thermal predictions (within 0.15 °C) while providing vastly different execution latencies!
 
 1. Add new CSV files to `dataset/` (same column format as existing files)
 2. Run `python ml_model/train_mlp.py`

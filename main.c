@@ -462,7 +462,8 @@ static void spi1_init(void)
     (void)RCC->APB2ENR;
 
     SPI1->CR1 = 0U;
-    SPI1->CR1 = SPI_CR1_MSTR | (1U << 3) | SPI_CR1_SSM | SPI_CR1_SSI;
+    /* Prescaler = /32 (4U << 3) -> 16 MHz / 32 = 500 kHz for high noise immunity on jumper wires */
+    SPI1->CR1 = SPI_CR1_MSTR | (4U << 3) | SPI_CR1_SSM | SPI_CR1_SSI;
     SPI1->CR1 |= SPI_CR1_SPE;
 }
 
@@ -569,6 +570,7 @@ int main(void)
         uint8_t  fault = 0U;
         int32_t  vin_mV = 0, vout_mV = 0, i_cmA = 0, amb_cC = 0, hs_cC = 0;
         int32_t  pred_cC = 0, ploss_cmW = 0;
+        uint32_t infer_us = 0;
 
         /* INA219: 12 V input rail */
         if (ina219_read(&vin_mV, &i_cmA)) {
@@ -596,25 +598,55 @@ int main(void)
             else if (r < 0)   { hs_cC = 0; fault |= F_MAX_COMM; }
         }
 
-        /* Threshold Rule: If Vin < 1000 mV (1.0 V), current and power dissipation must be 0 */
+        /* Persistent thermal prediction state (for smooth passive cooling decay) */
+        static int32_t s_pred_cC = 0;
+
+        /* Threshold Rule: If Vin < 1000 mV (1.0 V), regulator is unpowered -> COOLING PHASE */
         if (vin_mV < 1000) {
             i_cmA = 0;
             ploss_cmW = 0;
             mlp_reset_timebase();
-        } else if (!(fault & (F_INA219 | F_ADC))) {
-            /* Regulator dissipation: (Vin - Vout) * Iin */
-            int64_t dv = (int64_t)vin_mV - (int64_t)vout_mV;
-            if (dv < 0) dv = 0;
-            ploss_cmW = (int32_t)((dv * (int64_t)i_cmA) / 1000);
-        } else {
-            ploss_cmW = 0;
-        }
 
-        /* Benchmark TinyML inference latency via DWT */
-        uint32_t t_start = DWT->CYCCNT;
-        pred_cC = cnn_predict_temp_cC(ploss_cmW, i_cmA, amb_cC, hs_cC);
-        uint32_t infer_cycles = DWT->CYCCNT - t_start;
-        uint32_t infer_us = infer_cycles / 16U; /* 16 MHz HSI: 16 cycles = 1 us */
+            /* Newton's Law of Passive Cooling:
+             * Tau = 208 s (measured from heatsink dataset), dt = 0.5 s
+             * Alpha_Q15 = round(exp(-0.5 / 208.0) * 32768) = 32689 */
+            if (s_pred_cC == 0) {
+                s_pred_cC = amb_cC; /* Initial boot before first power-on */
+            }
+            int32_t delta = s_pred_cC - amb_cC;
+            if (delta > 0) {
+                delta = (int32_t)(((int64_t)delta * 32689LL) >> 15);
+                s_pred_cC = amb_cC + delta;
+            } else {
+                s_pred_cC = amb_cC;
+            }
+            pred_cC = s_pred_cC;
+            infer_us = 1U;
+        } else {
+            if (!(fault & (F_INA219 | F_ADC))) {
+                /* Regulator dissipation: (Vin - Vout) * Iin */
+                int64_t dv = (int64_t)vin_mV - (int64_t)vout_mV;
+                if (dv < 0) dv = 0;
+                ploss_cmW = (int32_t)((dv * (int64_t)i_cmA) / 1000);
+            } else {
+                ploss_cmW = 0;
+            }
+
+            /* Benchmark TinyML inference latency via DWT */
+            uint32_t t_start = DWT->CYCCNT;
+            pred_cC = cnn_predict_temp_cC(ploss_cmW, i_cmA, amb_cC, hs_cC);
+            uint32_t infer_cycles = DWT->CYCCNT - t_start;
+            infer_us = infer_cycles / 16U; /* 16 MHz HSI: 16 cycles = 1 us */
+
+            /* Physical Bounds: heatsink cannot be colder than ambient room or exceed KA7808 ceiling (125 °C) */
+            if (pred_cC < amb_cC) {
+                pred_cC = amb_cC;
+            }
+            if (pred_cC > 12500) {
+                pred_cC = 12500;
+            }
+            s_pred_cC = pred_cC;
+        }
 
         /* Build and send the CSV line (10 fields) */
         char  line[144];
