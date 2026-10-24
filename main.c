@@ -10,14 +10,14 @@
 #include "stm32f401xe.h"
 #include <stdint.h>
 
-#if __has_include("mlp_model_new.h")
-#include "mlp_model_new.h"
-#elif __has_include("New_models/mlp_model_new.h")
-#include "New_models/mlp_model_new.h"
-#elif __has_include("mlp_model.h")
+#if __has_include("mlp_model.h")
 #include "mlp_model.h"
 #elif __has_include("ml_model/mlp_model.h")
 #include "ml_model/mlp_model.h"
+#endif
+
+#ifndef BENCHMARK_MODE
+#define BENCHMARK_MODE 0
 #endif
 
 /* =========================== USER CONFIGURATION =========================== */
@@ -52,17 +52,12 @@ __attribute__((weak)) void mlp_reset_timebase(void)
 {
 }
 
-__attribute__((weak)) int32_t mlp_new_predict_temp_cC(int32_t hs_cC, int32_t amb_cC)
-{
-    (void)amb_cC;
-    return hs_cC;
-}
-
 __attribute__((weak)) int32_t cnn_predict_temp_cC(int32_t ploss_cmW, int32_t i_cmA, int32_t amb_cC, int32_t hs_cC)
 {
     (void)ploss_cmW;
     (void)i_cmA;
-    return mlp_new_predict_temp_cC(hs_cC, amb_cC);
+    (void)amb_cC;
+    return hs_cC;
 }
 
 /* ================================ TIMEBASE ================================ */
@@ -556,6 +551,16 @@ static int adc1_read_vout_mV(int32_t *vout_mV)
 /* ==================================== MAIN ================================ */
 int main(void)
 {
+#if (defined(BENCHMARK_MODE) && (BENCHMARK_MODE == 0 || BENCHMARK_MODE == 3))
+    /* Hardware FPU enabled: Grant CP10 & CP11 Full Access */
+    SCB->CPACR |= ((3UL << 20) | (3UL << 22));
+#else
+    /* Hardware FPU physically disabled in silicon: Clear CP10 & CP11 coprocessor access */
+    SCB->CPACR &= ~((3UL << 20) | (3UL << 22));
+#endif
+    __DSB();
+    __ISB();
+
     clock_init();
     gpio_init();
     timer5_init();
@@ -565,7 +570,20 @@ int main(void)
     spi1_init();
     adc1_init();
 
-    uart_puts("# thermal logger boot (STM32F401RE, bare-metal)\r\n");
+    uart_puts("# Project ThermoGuard (STM32F401RE Bare-Metal TinyML)\r\n");
+#if (BENCHMARK_MODE == 0)
+    uart_puts("# Active: Mode 0 (32-bit Float + Hardware FPU)\r\n");
+#elif (BENCHMARK_MODE == 1)
+    uart_puts("# Active: Mode 1 (32-bit Int Without FPU - Normal Division)\r\n");
+#elif (BENCHMARK_MODE == 2)
+    uart_puts("# Active: Mode 2 (32-bit Int Without FPU - PoT Bit-Shift)\r\n");
+#elif (BENCHMARK_MODE == 3)
+    uart_puts("# Active: Mode 3 (16-bit Float + Hardware FPU)\r\n");
+#elif (BENCHMARK_MODE == 4)
+    uart_puts("# Active: Mode 4 (16-bit Int Without FPU - Normal Division)\r\n");
+#elif (BENCHMARK_MODE == 5)
+    uart_puts("# Active: Mode 5 (16-bit Int Without FPU - PoT + ARM SMLAD SIMD)\r\n");
+#endif
     if (ina219_init())  uart_puts("# WARN: INA219 not responding\r\n");
     if (bme280_init())  uart_puts("# WARN: BME280/BMP280 not responding\r\n");
 
@@ -672,9 +690,9 @@ int main(void)
                 ploss_cmW = 0;
             }
 
-            /* Benchmark TinyML inference latency via DWT (mlp_model_new: heatsink + ambient -> future temp) */
+            /* Benchmark TinyML inference latency via DWT */
             uint32_t t_start = DWT->CYCCNT;
-            pred_cC = mlp_new_predict_temp_cC(hs_cC, amb_cC);
+            pred_cC = cnn_predict_temp_cC(ploss_cmW, i_cmA, amb_cC, hs_cC);
             uint32_t infer_cycles = DWT->CYCCNT - t_start;
             infer_us = infer_cycles / 16U; /* 16 MHz HSI: 16 cycles = 1 us */
 
