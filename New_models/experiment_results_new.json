@@ -1,0 +1,599 @@
+[
+  {
+    "formulation": "Thermal Predictor + Time (3-feat)",
+    "formulation_key": "thermal_time",
+    "features": [
+      "heatsink_temp_C",
+      "ambient_temp_C",
+      "elapsed_min"
+    ],
+    "target": "temp_future_1s",
+    "architecture": "tiny_8",
+    "hidden": [
+      8
+    ],
+    "params": 41,
+    "flash_bytes": 164,
+    "ram_bytes": 64,
+    "est_latency_us": 12.0,
+    "test_mae": 2.4407,
+    "test_rmse": 3.6378,
+    "test_r2": 0.9241,
+    "train_mae": 0.1494,
+    "train_r2": 0.9998,
+    "n_iter": 353,
+    "train_time_s": 2.02
+  },
+  {
+    "formulation": "Thermal Predictor + Time (3-feat)",
+    "formulation_key": "thermal_time",
+    "features": [
+      "heatsink_temp_C",
+      "ambient_temp_C",
+      "elapsed_min"
+    ],
+    "target": "temp_future_1s",
+    "architecture": "small_16",
+    "hidden": [
+      16
+    ],
+    "params": 81,
+    "flash_bytes": 324,
+    "ram_bytes": 128,
+    "est_latency_us": 24.0,
+    "test_mae": 2.0993,
+    "test_rmse": 3.2602,
+    "test_r2": 0.939,
+    "train_mae": 0.2458,
+    "train_r2": 0.9995,
+    "n_iter": 490,
+    "train_time_s": 3.25
+  },
+  {
+    "formulation": "Thermal Predictor + Time (3-feat)",
+    "formulation_key": "thermal_time",
+    "features": [
+      "heatsink_temp_C",
+      "ambient_temp_C",
+      "elapsed_min"
+    ],
+    "target": "temp_future_1s",
+    "architecture": "small_32",
+    "hidden": [
+      32
+    ],
+    "params": 161,
+    "flash_bytes": 644,
+    "ram_bytes": 256,
+    "est_latency_us": 48.0,
+    "test_mae": 2.955,
+    "test_rmse": 3.7696,
+    "test_r2": 0.9185,
+    "train_mae": 0.3394,
+    "train_r2": 0.9991,
+    "n_iter": 305,
+    "train_time_s": 2.53
+  },
+  {
+    "formulation": "Thermal Predictor + Time (3-feat)",
+    "formulation_key": "thermal_time",
+    "features": [
+      "heatsink_temp_C",
+      "ambient_temp_C",
+      "elapsed_min"
+    ],
+    "target": "temp_future_1s",
+    "architecture": "medium_16_8",
+    "hidden": [
+      16,
+      8
+    ],
+    "params": 209,
+    "flash_bytes": 836,
+    "ram_bytes": 128,
+    "est_latency_us": 69.0,
+    "test_mae": 1.3223,
+    "test_rmse": 1.7325,
+    "test_r2": 0.9828,
+    "train_mae": 0.1919,
+    "train_r2": 0.9997,
+    "n_iter": 311,
+    "train_time_s": 3.03
+  },
+  {
+    "formulation": "Thermal Predictor + Time (3-feat)",
+    "formulation_key": "thermal_time",
+    "features": [
+      "heatsink_temp_C",
+      "ambient_temp_C",
+      "elapsed_min"
+    ],
+    "target": "temp_future_1s",
+    "architecture": "medium_32_16",
+    "hidden": [
+      32,
+      16
+    ],
+    "params": 673,
+    "flash_bytes": 2692,
+    "ram_bytes": 256,
+    "est_latency_us": 234.0,
+    "test_mae": 2.9528,
+    "test_rmse": 4.3434,
+    "test_r2": 0.8918,
+    "train_mae": 0.1844,
+    "train_r2": 0.9997,
+    "n_iter": 170,
+    "train_time_s": 1.92
+  },
+  {
+    "formulation": "Thermal Predictor + Time (3-feat)",
+    "formulation_key": "thermal_time",
+    "features": [
+      "heatsink_temp_C",
+      "ambient_temp_C",
+      "elapsed_min"
+    ],
+    "target": "temp_future_1s",
+    "architecture": "deep_16_16_8",
+    "hidden": [
+      16,
+      16,
+      8
+    ],
+    "params": 481,
+    "flash_bytes": 1924,
+    "ram_bytes": 128,
+    "est_latency_us": 165.0,
+    "test_mae": 0.7467,
+    "test_rmse": 0.895,
+    "test_r2": 0.9954,
+    "train_mae": 0.145,
+    "train_r2": 0.9999,
+    "n_iter": 221,
+    "train_time_s": 2.84
+  },
+  {
+    "formulation": "Thermal Predictor + Time (3-feat)",
+    "formulation_key": "thermal_time",
+    "features": [
+      "heatsink_temp_C",
+      "ambient_temp_C",
+      "elapsed_min"
+    ],
+    "target": "temp_future_1s",
+    "architecture": "large_64_32",
+    "hidden": [
+      64,
+      32
+    ],
+    "params": 2369,
+    "flash_bytes": 9476,
+    "ram_bytes": 512,
+    "est_latency_us": 852.0,
+    "test_mae": 2.8744,
+    "test_rmse": 3.6502,
+    "test_r2": 0.9235,
+    "train_mae": 0.1863,
+    "train_r2": 0.9998,
+    "n_iter": 115,
+    "train_time_s": 3.43
+  },
+  {
+    "formulation": "Thermal Predictor + Time (3-feat)",
+    "formulation_key": "thermal_time",
+    "features": [
+      "heatsink_temp_C",
+      "ambient_temp_C",
+      "elapsed_min"
+    ],
+    "target": "temp_future_1s",
+    "architecture": "wide_64_32_16",
+    "hidden": [
+      64,
+      32,
+      16
+    ],
+    "params": 2881,
+    "flash_bytes": 11524,
+    "ram_bytes": 512,
+    "est_latency_us": 1038.0,
+    "test_mae": 2.9926,
+    "test_rmse": 4.531,
+    "test_r2": 0.8822,
+    "train_mae": 0.177,
+    "train_r2": 0.9998,
+    "n_iter": 156,
+    "train_time_s": 5.38
+  },
+  {
+    "formulation": "Thermal Predictor (2-feat)",
+    "formulation_key": "thermal_core",
+    "features": [
+      "heatsink_temp_C",
+      "ambient_temp_C"
+    ],
+    "target": "temp_future_1s",
+    "architecture": "tiny_8",
+    "hidden": [
+      8
+    ],
+    "params": 33,
+    "flash_bytes": 132,
+    "ram_bytes": 64,
+    "est_latency_us": 9.0,
+    "test_mae": 0.1299,
+    "test_rmse": 0.1897,
+    "test_r2": 0.9998,
+    "train_mae": 0.1518,
+    "train_r2": 0.9998,
+    "n_iter": 375,
+    "train_time_s": 2.0
+  },
+  {
+    "formulation": "Thermal Predictor (2-feat)",
+    "formulation_key": "thermal_core",
+    "features": [
+      "heatsink_temp_C",
+      "ambient_temp_C"
+    ],
+    "target": "temp_future_1s",
+    "architecture": "small_16",
+    "hidden": [
+      16
+    ],
+    "params": 65,
+    "flash_bytes": 260,
+    "ram_bytes": 128,
+    "est_latency_us": 18.0,
+    "test_mae": 0.1671,
+    "test_rmse": 0.2074,
+    "test_r2": 0.9998,
+    "train_mae": 0.1393,
+    "train_r2": 0.9999,
+    "n_iter": 484,
+    "train_time_s": 2.77
+  },
+  {
+    "formulation": "Thermal Predictor (2-feat)",
+    "formulation_key": "thermal_core",
+    "features": [
+      "heatsink_temp_C",
+      "ambient_temp_C"
+    ],
+    "target": "temp_future_1s",
+    "architecture": "small_32",
+    "hidden": [
+      32
+    ],
+    "params": 129,
+    "flash_bytes": 516,
+    "ram_bytes": 256,
+    "est_latency_us": 36.0,
+    "test_mae": 0.284,
+    "test_rmse": 0.3473,
+    "test_r2": 0.9993,
+    "train_mae": 0.2185,
+    "train_r2": 0.9997,
+    "n_iter": 318,
+    "train_time_s": 2.37
+  },
+  {
+    "formulation": "Thermal Predictor (2-feat)",
+    "formulation_key": "thermal_core",
+    "features": [
+      "heatsink_temp_C",
+      "ambient_temp_C"
+    ],
+    "target": "temp_future_1s",
+    "architecture": "medium_16_8",
+    "hidden": [
+      16,
+      8
+    ],
+    "params": 193,
+    "flash_bytes": 772,
+    "ram_bytes": 128,
+    "est_latency_us": 63.0,
+    "test_mae": 0.1846,
+    "test_rmse": 0.2335,
+    "test_r2": 0.9997,
+    "train_mae": 0.1608,
+    "train_r2": 0.9998,
+    "n_iter": 252,
+    "train_time_s": 2.14
+  },
+  {
+    "formulation": "Thermal Predictor (2-feat)",
+    "formulation_key": "thermal_core",
+    "features": [
+      "heatsink_temp_C",
+      "ambient_temp_C"
+    ],
+    "target": "temp_future_1s",
+    "architecture": "medium_32_16",
+    "hidden": [
+      32,
+      16
+    ],
+    "params": 641,
+    "flash_bytes": 2564,
+    "ram_bytes": 256,
+    "est_latency_us": 222.0,
+    "test_mae": 0.1793,
+    "test_rmse": 0.2378,
+    "test_r2": 0.9997,
+    "train_mae": 0.1685,
+    "train_r2": 0.9998,
+    "n_iter": 157,
+    "train_time_s": 1.68
+  },
+  {
+    "formulation": "Thermal Predictor (2-feat)",
+    "formulation_key": "thermal_core",
+    "features": [
+      "heatsink_temp_C",
+      "ambient_temp_C"
+    ],
+    "target": "temp_future_1s",
+    "architecture": "deep_16_16_8",
+    "hidden": [
+      16,
+      16,
+      8
+    ],
+    "params": 465,
+    "flash_bytes": 1860,
+    "ram_bytes": 128,
+    "est_latency_us": 159.0,
+    "test_mae": 0.2114,
+    "test_rmse": 0.2768,
+    "test_r2": 0.9996,
+    "train_mae": 0.1687,
+    "train_r2": 0.9998,
+    "n_iter": 172,
+    "train_time_s": 2.02
+  },
+  {
+    "formulation": "Thermal Predictor (2-feat)",
+    "formulation_key": "thermal_core",
+    "features": [
+      "heatsink_temp_C",
+      "ambient_temp_C"
+    ],
+    "target": "temp_future_1s",
+    "architecture": "large_64_32",
+    "hidden": [
+      64,
+      32
+    ],
+    "params": 2305,
+    "flash_bytes": 9220,
+    "ram_bytes": 512,
+    "est_latency_us": 828.0,
+    "test_mae": 0.2932,
+    "test_rmse": 0.3719,
+    "test_r2": 0.9992,
+    "train_mae": 0.1918,
+    "train_r2": 0.9997,
+    "n_iter": 159,
+    "train_time_s": 4.25
+  },
+  {
+    "formulation": "Thermal Predictor (2-feat)",
+    "formulation_key": "thermal_core",
+    "features": [
+      "heatsink_temp_C",
+      "ambient_temp_C"
+    ],
+    "target": "temp_future_1s",
+    "architecture": "wide_64_32_16",
+    "hidden": [
+      64,
+      32,
+      16
+    ],
+    "params": 2817,
+    "flash_bytes": 11268,
+    "ram_bytes": 512,
+    "est_latency_us": 1014.0,
+    "test_mae": 0.2379,
+    "test_rmse": 0.3196,
+    "test_r2": 0.9994,
+    "train_mae": 0.1618,
+    "train_r2": 0.9998,
+    "n_iter": 88,
+    "train_time_s": 2.72
+  },
+  {
+    "formulation": "Single Sensor Baseline (1-feat)",
+    "formulation_key": "single_sensor",
+    "features": [
+      "heatsink_temp_C"
+    ],
+    "target": "temp_future_1s",
+    "architecture": "tiny_8",
+    "hidden": [
+      8
+    ],
+    "params": 25,
+    "flash_bytes": 100,
+    "ram_bytes": 64,
+    "est_latency_us": 6.0,
+    "test_mae": 0.2527,
+    "test_rmse": 0.3724,
+    "test_r2": 0.9992,
+    "train_mae": 0.1702,
+    "train_r2": 0.9997,
+    "n_iter": 283,
+    "train_time_s": 1.97
+  },
+  {
+    "formulation": "Single Sensor Baseline (1-feat)",
+    "formulation_key": "single_sensor",
+    "features": [
+      "heatsink_temp_C"
+    ],
+    "target": "temp_future_1s",
+    "architecture": "small_16",
+    "hidden": [
+      16
+    ],
+    "params": 49,
+    "flash_bytes": 196,
+    "ram_bytes": 128,
+    "est_latency_us": 12.0,
+    "test_mae": 0.1437,
+    "test_rmse": 0.1947,
+    "test_r2": 0.9998,
+    "train_mae": 0.166,
+    "train_r2": 0.9998,
+    "n_iter": 268,
+    "train_time_s": 2.42
+  },
+  {
+    "formulation": "Single Sensor Baseline (1-feat)",
+    "formulation_key": "single_sensor",
+    "features": [
+      "heatsink_temp_C"
+    ],
+    "target": "temp_future_1s",
+    "architecture": "small_32",
+    "hidden": [
+      32
+    ],
+    "params": 97,
+    "flash_bytes": 388,
+    "ram_bytes": 256,
+    "est_latency_us": 24.0,
+    "test_mae": 0.1416,
+    "test_rmse": 0.195,
+    "test_r2": 0.9998,
+    "train_mae": 0.1679,
+    "train_r2": 0.9997,
+    "n_iter": 206,
+    "train_time_s": 1.9
+  },
+  {
+    "formulation": "Single Sensor Baseline (1-feat)",
+    "formulation_key": "single_sensor",
+    "features": [
+      "heatsink_temp_C"
+    ],
+    "target": "temp_future_1s",
+    "architecture": "medium_16_8",
+    "hidden": [
+      16,
+      8
+    ],
+    "params": 177,
+    "flash_bytes": 708,
+    "ram_bytes": 128,
+    "est_latency_us": 57.0,
+    "test_mae": 0.1455,
+    "test_rmse": 0.1947,
+    "test_r2": 0.9998,
+    "train_mae": 0.1429,
+    "train_r2": 0.9998,
+    "n_iter": 141,
+    "train_time_s": 1.51
+  },
+  {
+    "formulation": "Single Sensor Baseline (1-feat)",
+    "formulation_key": "single_sensor",
+    "features": [
+      "heatsink_temp_C"
+    ],
+    "target": "temp_future_1s",
+    "architecture": "medium_32_16",
+    "hidden": [
+      32,
+      16
+    ],
+    "params": 609,
+    "flash_bytes": 2436,
+    "ram_bytes": 256,
+    "est_latency_us": 210.0,
+    "test_mae": 53.1041,
+    "test_rmse": 54.7204,
+    "test_r2": -16.1814,
+    "train_mae": 42.9352,
+    "train_r2": -8.0454,
+    "n_iter": 600,
+    "train_time_s": 7.35
+  },
+  {
+    "formulation": "Single Sensor Baseline (1-feat)",
+    "formulation_key": "single_sensor",
+    "features": [
+      "heatsink_temp_C"
+    ],
+    "target": "temp_future_1s",
+    "architecture": "deep_16_16_8",
+    "hidden": [
+      16,
+      16,
+      8
+    ],
+    "params": 449,
+    "flash_bytes": 1796,
+    "ram_bytes": 128,
+    "est_latency_us": 153.0,
+    "test_mae": 0.1895,
+    "test_rmse": 0.2444,
+    "test_r2": 0.9997,
+    "train_mae": 0.1773,
+    "train_r2": 0.9998,
+    "n_iter": 87,
+    "train_time_s": 1.12
+  },
+  {
+    "formulation": "Single Sensor Baseline (1-feat)",
+    "formulation_key": "single_sensor",
+    "features": [
+      "heatsink_temp_C"
+    ],
+    "target": "temp_future_1s",
+    "architecture": "large_64_32",
+    "hidden": [
+      64,
+      32
+    ],
+    "params": 2241,
+    "flash_bytes": 8964,
+    "ram_bytes": 512,
+    "est_latency_us": 804.0,
+    "test_mae": 0.1678,
+    "test_rmse": 0.2311,
+    "test_r2": 0.9997,
+    "train_mae": 0.1834,
+    "train_r2": 0.9997,
+    "n_iter": 83,
+    "train_time_s": 2.54
+  },
+  {
+    "formulation": "Single Sensor Baseline (1-feat)",
+    "formulation_key": "single_sensor",
+    "features": [
+      "heatsink_temp_C"
+    ],
+    "target": "temp_future_1s",
+    "architecture": "wide_64_32_16",
+    "hidden": [
+      64,
+      32,
+      16
+    ],
+    "params": 2753,
+    "flash_bytes": 11012,
+    "ram_bytes": 512,
+    "est_latency_us": 990.0,
+    "test_mae": 0.1522,
+    "test_rmse": 0.202,
+    "test_r2": 0.9998,
+    "train_mae": 0.1422,
+    "train_r2": 0.9998,
+    "n_iter": 79,
+    "train_time_s": 2.69
+  }
+]

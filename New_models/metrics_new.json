@@ -1,0 +1,15 @@
+{
+  "best_model": {
+    "name": "tiny_8",
+    "hidden_layers": [
+      8
+    ],
+    "holdout_test_mae": 0.1299,
+    "holdout_test_rmse": 0.1897,
+    "holdout_test_r2": 0.9998,
+    "full_dataset_mae": 0.1359,
+    "parameters": 33,
+    "est_latency_us": 9.0,
+    "flash_bytes": 132
+  }
+}
