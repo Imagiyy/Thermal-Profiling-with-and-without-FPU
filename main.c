@@ -769,7 +769,7 @@ int main(void)
              * Tau = 208 s (measured from heatsink dataset), dt = 0.5 s
              * Alpha_Q15 = round(exp(-0.5 / 208.0) * 32768) = 32689 */
             if (s_pred_cC == 0) {
-                s_pred_cC = amb_cC; /* Initial boot before first power-on */
+                s_pred_cC = (hs_cC > amb_cC) ? hs_cC : amb_cC; /* Initialize to actual heatsink temp if hot at boot */
             }
             int32_t delta = s_pred_cC - amb_cC;
             if (delta > 0) {
@@ -800,9 +800,12 @@ int main(void)
             uint32_t infer_cycles = DWT->CYCCNT - t_start;
             infer_us = infer_cycles / 16U; /* 16 MHz HSI: 16 cycles = 1 us */
 
-            /* Physical Bounds: heatsink cannot be colder than ambient room or exceed KA7808 ceiling (125 °C) */
-            if (pred_cC < amb_cC) {
-                pred_cC = amb_cC;
+            /* Physical Invariant:
+             * While powered, the regulator cannot be colder than the currently measured heatsink.
+             * Prevents massive tracking errors when starting mid-heating. */
+            int32_t lower_bound = (hs_cC > amb_cC) ? hs_cC : amb_cC;
+            if (pred_cC < lower_bound) {
+                pred_cC = lower_bound;
             }
             if (pred_cC > 12500) {
                 pred_cC = 12500;
