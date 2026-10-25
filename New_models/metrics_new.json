@@ -1,15 +1,21 @@
 {
   "best_model": {
-    "name": "tiny_8",
+    "name": "small_32",
     "hidden_layers": [
-      8
+      32
     ],
-    "holdout_test_mae": 0.1371,
-    "holdout_test_rmse": 0.1918,
-    "holdout_test_r2": 0.9998,
-    "full_dataset_mae": 0.1289,
-    "parameters": 33,
-    "est_latency_us": 9.0,
-    "flash_bytes": 132
+    "features": [
+      "heatsink_temp_C",
+      "ambient_temp_C",
+      "power_loss_mW",
+      "current_mA"
+    ],
+    "holdout_test_mae": 0.2377,
+    "holdout_test_rmse": 0.3062,
+    "holdout_test_r2": 0.9995,
+    "full_dataset_mae": 0.1514,
+    "parameters": 193,
+    "est_latency_us": 60.0,
+    "flash_bytes": 772
   }
 }

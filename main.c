@@ -96,9 +96,12 @@ __attribute__((weak)) int32_t cnn_predict_temp_cC(int32_t ploss_cmW, int32_t i_c
     return hs_cC;
 }
 
-__attribute__((weak)) int32_t mlp_new_predict_temp_cC(int32_t hs_cC, int32_t amb_cC)
+__attribute__((weak)) int32_t mlp_new_predict_temp_cC(int32_t hs_cC, int32_t amb_cC,
+                                                       int32_t ploss_cmW, int32_t i_cmA)
 {
     (void)amb_cC;
+    (void)ploss_cmW;
+    (void)i_cmA;
     return hs_cC;
 }
 
@@ -793,7 +796,9 @@ int main(void)
             /* Benchmark TinyML inference latency via DWT */
             uint32_t t_start = DWT->CYCCNT;
             if (active_model == MODEL_MLP_NEW) {
-                pred_cC = mlp_new_predict_temp_cC(hs_cC, amb_cC);
+                /* 4-input stateless model: heatsink, ambient, power, current.
+                 * No elapsed_time counter -- starting mid-heating is fully supported. */
+                pred_cC = mlp_new_predict_temp_cC(hs_cC, amb_cC, ploss_cmW, i_cmA);
             } else {
                 pred_cC = cnn_predict_temp_cC(ploss_cmW, i_cmA, amb_cC, hs_cC);
             }
