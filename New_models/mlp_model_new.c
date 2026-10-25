@@ -431,7 +431,7 @@ int32_t mlp_new_predict_temp_cC(int32_t hs_cC, int32_t amb_cC,
     int16_t x_q[4];
     for (int i = 0; i < 4; i++) {
         int32_t diff = raw_c[i] - norm_mean_c[i];
-        x_q[i] = (int16_t)(((int64_t)diff * SCALE_NORMAL_16) / norm_scale_c[i]);
+        x_q[i] = (int16_t)((diff * SCALE_NORMAL_16) / norm_scale_c[i]);
     }
 
     int16_t h_q[32];
@@ -517,7 +517,7 @@ int32_t mlp_new_predict_temp_cC(int32_t hs_cC, int32_t amb_cC,
     int16_t x_q[4];
     for (int i = 0; i < 4; i++) {
         int32_t diff = raw_c[i] - pot_mean_c[i];
-        x_q[i] = (int16_t)(((int64_t)diff << SHIFT_POT_16) / (int64_t)pot_scale_c[i]);
+        x_q[i] = (int16_t)((diff << SHIFT_POT_16) / pot_scale_c[i]);
     }
 
     /* Pack 4 inputs into two 32-bit SIMD registers */
