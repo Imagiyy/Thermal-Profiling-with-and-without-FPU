@@ -11,7 +11,7 @@
 #include <stdint.h>
 
 #ifndef BENCHMARK_MODE
-#define BENCHMARK_MODE 0
+#define BENCHMARK_MODE 5 /* Mode 5: 16-bit PoT + ARM SMLAD SIMD */
 #endif
 
 #if __has_include("mlp_model.h")

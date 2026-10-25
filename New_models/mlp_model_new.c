@@ -16,10 +16,10 @@
 
 static inline int32_t smlad_dual(uint32_t x_pair, uint32_t w_pair, int32_t acc)
 {
-#if defined(__arm__) || defined(__thumb__)
-    __asm__ volatile ("smlad %0, %1, %2, %3"
-                      : "=r" (acc)
-                      : "r" (x_pair), "r" (w_pair), "r" (acc));
+#if defined(__arm__) || defined(__thumb__) || defined(__thumb2__)
+    __asm__ volatile ("smlad %0, %1, %2, %0"
+                      : "+r" (acc)
+                      : "r" (x_pair), "r" (w_pair));
     return acc;
 #else
     int16_t x0 = (int16_t)(x_pair & 0xFFFFU);
