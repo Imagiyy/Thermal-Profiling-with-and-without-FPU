@@ -38,7 +38,7 @@
 #define MODE_16BIT_FIXED_POT_SIMD 5
 
 #ifndef BENCHMARK_MODE
-#define BENCHMARK_MODE            MODE_32BIT_FPU
+#define BENCHMARK_MODE            MODE_16BIT_FIXED_POT_SIMD
 #endif
 
 /*
