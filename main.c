@@ -11,7 +11,7 @@
 #include <stdint.h>
 
 #ifndef BENCHMARK_MODE
-#define BENCHMARK_MODE 5 /* Mode 5: 16-bit PoT + ARM SMLAD SIMD */
+#define BENCHMARK_MODE 0 /* Mode 5: 16-bit PoT + ARM SMLAD SIMD */
 #endif
 
 #if __has_include("mlp_model.h")
@@ -62,6 +62,10 @@ static volatile uint8_t active_model = ACTIVE_MODEL;
 #define I2C_TIMEOUT_MS     5U
 #define SPI_TIMEOUT_MS     5U
 #define ADC_TIMEOUT_MS     5U
+
+/* Newton's Law of Cooling: Q15 decay factor for dt = 3.0 s, Tau = 208 s
+ * ALPHA_COOL_Q15 = round(exp(-3.0 / 208.0) * 32768) = 32300 */
+#define ALPHA_COOL_Q15     32300
 
 /* ======================== MOSFET POWER CUTOFF ============================= */
 /* STM32 Nucleo-64 Pin: PA8 (Arduino Digital Header D7, CN9 Pin 1)
@@ -760,27 +764,26 @@ int main(void)
             fault |= F_THERMAL_TRIP;
         }
 
-        /* Persistent thermal prediction state (for smooth passive cooling decay) */
-        static int32_t s_pred_cC = 0;
-
         /* Threshold Rule: If Vin < 8500 mV (8.5 V), regulator is unpowered -> COOLING PHASE
-         * (KA7808 requires Vin >= 9.5 V to regulate 8.0 V; avoids 30s cap discharge noise) */
+         * (KA7808 requires Vin >= 9.5 V to regulate 8.0 V; avoids 30s cap discharge noise)
+         *
+         * Both phases use closed-loop 1-step lookahead anchored to live
+         * filtered sensor readings (hs_cC, amb_cC) — no open-loop state. */
         if (vin_mV < 8500) {
             i_cmA = 0;
             ploss_cmW = 0;
             mlp_reset_timebase();
 
-            /* Newton's Law of Passive Cooling forecast (+1s ahead):
-             * Tau = 208 s (measured from heatsink dataset), dt = 1.0 s
-             * Alpha_Q15 = round(exp(-1.0 / 208.0) * 32768) = 32610 */
+            /* Newton's Law of Passive Cooling: 3-second lookahead (t + 3.0s)
+             * Tau = 208 s (measured from heatsink dataset), dt = 3.0 s
+             * ALPHA_COOL_Q15 = round(exp(-3.0 / 208.0) * 32768) = 32300
+             * Anchored to live hs_cC each iteration (closed-loop). */
             int32_t delta = hs_cC - amb_cC;
             if (delta > 0) {
-                delta = (int32_t)(((int64_t)delta * 32610LL) >> 15);
-                pred_cC = amb_cC + delta;
+                pred_cC = amb_cC + (int32_t)(((int64_t)delta * ALPHA_COOL_Q15) >> 15);
             } else {
                 pred_cC = hs_cC;
             }
-            s_pred_cC = pred_cC;
             infer_us = 1U;
         } else {
             if (!(fault & (F_INA219 | F_ADC))) {
@@ -817,12 +820,12 @@ int main(void)
             uint32_t infer_cycles = DWT->CYCCNT - t_start;
             infer_us = infer_cycles / 16U; /* 16 MHz HSI: 16 cycles = 1 us */
 
-            /* Physical Invariant:
-             * While powered, the regulator cannot be colder than the currently measured heatsink.
-             * Prevents massive tracking errors when starting mid-heating. */
-            int32_t lower_bound = (hs_cC > amb_cC) ? hs_cC : amb_cC;
-            if (pred_cC < lower_bound) {
-                pred_cC = lower_bound;
+            /* Physical Boundary Invariants (closed-loop, anchored to live hs_cC):
+             * Under positive power dissipation, the junction/regulator cannot be
+             * colder than the heatsink -> clamp lower bound to hs_cC.
+             * Absolute ceiling: 125.0 °C (12500 cC). */
+            if (ploss_cmW > 0 && pred_cC < hs_cC) {
+                pred_cC = hs_cC;
             }
             if (pred_cC > 12500) {
                 pred_cC = 12500;
@@ -857,7 +860,8 @@ int main(void)
             }
         }
 
-        s_pred_cC = pred_cC;
+        /* pred_cC is now purely derived from live sensor state each iteration
+         * (closed-loop) — no persistent autoregressive state needed. */
 
         /* Build and send the CSV line (10 fields) */
         char  line[144];

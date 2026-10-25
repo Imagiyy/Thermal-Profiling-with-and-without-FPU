@@ -164,8 +164,8 @@
         <span class="text-[10px] uppercase tracking-wider text-gray-500 font-medium">Tracking Error</span>
         <span id="kpi-error-val" class="text-xl font-bold text-accent-cyan tabular-nums">—</span>
         <!-- [10s Prediction]: <span class="text-[10px] text-gray-500">|T<sub>meas</sub>(now) − T<sub>pred</sub>(10 s ago)| °C</span> -->
-        <!-- [1s Prediction]: Active -->
-        <span class="text-[10px] text-gray-500">|T<sub>meas</sub>(now) − T<sub>pred</sub>(1 s ago)| °C</span>
+        <!-- [3s Prediction]: Active -->
+        <span class="text-[10px] text-gray-500">|T<sub>meas</sub>(now) − T<sub>pred</sub>(3 s ago)| °C</span>
       </div>
 
       <!-- KPI: MAE -->
@@ -186,9 +186,8 @@
       <div id="kpi-pred-temp" class="glass rounded-xl p-3 flex flex-col gap-0.5 transition-all hover:border-white/10">
         <span class="text-[10px] uppercase tracking-wider text-gray-500 font-medium">Predicted Temp</span>
         <span id="kpi-pred-temp-val" class="text-xl font-bold text-accent-lime tabular-nums">—</span>
-        <!-- [10s Prediction]: <span class="text-[10px] text-gray-500">T<sub>pred</sub> forecast for +10 s °C</span> -->
-        <!-- [1s Prediction]: Active -->
-        <span class="text-[10px] text-gray-500">T<sub>pred</sub> forecast for +1 s °C</span>
+        <!-- [3s Prediction]: Active -->
+        <span class="text-[10px] text-gray-500">T<sub>pred</sub> forecast for +3 s °C</span>
       </div>
 
       <!-- KPI: Thermal Safety -->
@@ -222,8 +221,8 @@
         <div>
           <h2 class="text-sm font-semibold text-gray-200">Thermal Tracking</h2>
           <!-- [10s Prediction]: <p class="text-[10px] text-gray-500">T<sub>measured</sub> vs T<sub>predicted</sub> (made 10 s earlier) vs T<sub>ambient</sub> — <span id="thermal-window-lbl">120s</span> window</p> -->
-          <!-- [1s Prediction]: Active -->
-          <p class="text-[10px] text-gray-500">T<sub>measured</sub> vs T<sub>predicted</sub> (made 1 s earlier) vs T<sub>ambient</sub> — <span id="thermal-window-lbl">120s</span> window</p>
+          <!-- [3s Prediction]: Active -->
+          <p class="text-[10px] text-gray-500">T<sub>measured</sub> vs T<sub>predicted</sub> (made 3 s earlier) vs T<sub>ambient</sub> — <span id="thermal-window-lbl">120s</span> window</p>
         </div>
         <div class="flex items-center gap-1 bg-surface-850 p-1 rounded-lg border border-white/5">
           <button id="btn-thermal-zoom-in" title="Zoom In (+)" class="w-6 h-6 flex items-center justify-center text-xs font-bold rounded bg-white/5 hover:bg-white/15 text-gray-300 hover:text-white transition-colors">+</button>

@@ -2,7 +2,7 @@
 """
 experiment_mlp_new.py -- Thermal Predictor MLP: Stateless 4-Feature Model.
 
-Features: [heatsink_temp_C, ambient_temp_C, power_loss_mW, current_mA] -> future_temp (+1s)
+Features: [heatsink_temp_C, ambient_temp_C, power_loss_mW, current_mA] -> future_temp (+3s)
 
 Why no elapsed_time?
   The previous model used g_sample_count (elapsed minutes) as its 4th feature.
@@ -19,7 +19,7 @@ Leakage Prevention Guarantees:
   - Scaler: StandardScaler fit ONLY on training data, only transform on test.
   - Label Leakage: Dropped any pre-existing 'predicted_temp_C'.
   - Physical Filter: Filters Vin < 10V, sensor overflows, T_hs <= 20 degC.
-  - No Future-to-Present Leakage: target is strictly +1s (2 samples) ahead.
+  - No Future-to-Present Leakage: target is strictly +3s (6 samples) ahead.
 """
 
 from __future__ import annotations
@@ -79,9 +79,9 @@ def load_and_preprocess() -> pd.DataFrame:
         )
         df_clean = df[mask].copy()
         df_clean["source"] = f.stem
-        df_clean["temp_future_1s"] = df_clean["heatsink_temp_C"].shift(-2)
-        df_clean = df_clean.dropna(subset=["temp_future_1s"]).copy()
-        df_clean["delta_T"] = df_clean["temp_future_1s"] - df_clean["heatsink_temp_C"]
+        df_clean["temp_future_3s"] = df_clean["heatsink_temp_C"].shift(-6)
+        df_clean = df_clean.dropna(subset=["temp_future_3s"]).copy()
+        df_clean["delta_T"] = df_clean["temp_future_3s"] - df_clean["heatsink_temp_C"]
 
         print(f"  [Clean] {f.name:12s}: {raw_len} raw -> {len(df_clean)} clean "
               f"(T_hs: {df_clean['heatsink_temp_C'].min():.1f} -> "
@@ -106,7 +106,7 @@ def augment_training_data(df_train: pd.DataFrame) -> pd.DataFrame:
     system by s without distorting thermal gradients.
     """
     tau = 208.0  # thermal time constant (s)
-    dt  = 1.0    # prediction horizon (s)
+    dt  = 3.0    # prediction horizon (s)
     shifts = [-15.0, -12.0, -9.0, -6.0, -3.0, 0.0, +3.0, +5.0, +8.0, +10.0]
 
     augmented = []
@@ -114,8 +114,8 @@ def augment_training_data(df_train: pd.DataFrame) -> pd.DataFrame:
         d = df_train.copy()
         d["ambient_temp_C"]  = d["ambient_temp_C"]  + s + np.random.normal(0, 0.05, len(d))
         d["heatsink_temp_C"] = d["heatsink_temp_C"] + s
-        d["temp_future_1s"]  = d["temp_future_1s"]  + s
-        d["delta_T"]         = d["temp_future_1s"] - d["heatsink_temp_C"]
+        d["temp_future_3s"]  = d["temp_future_3s"]  + s
+        d["delta_T"]         = d["temp_future_3s"] - d["heatsink_temp_C"]
         augmented.append(d)
 
     rng = np.random.default_rng(42)
@@ -130,7 +130,7 @@ def augment_training_data(df_train: pd.DataFrame) -> pd.DataFrame:
                     "ambient_temp_C":  amb + rng.normal(0, 0.05),
                     "power_loss_mW":   0.0,
                     "current_mA":      0.0,
-                    "temp_future_1s":  hs + cooling_delta,
+                    "temp_future_3s":  hs + cooling_delta,
                     "delta_T":         cooling_delta,
                     "source":          "standby_anchor",
                 })
@@ -198,13 +198,13 @@ def run_architecture_search(df: pd.DataFrame):
 
         pred_delta = mlp.predict(X_test_s)
         pred_future = df_test["heatsink_temp_C"].values + pred_delta
-        actual_future = df_test["temp_future_1s"].values
+        actual_future = df_test["temp_future_3s"].values
 
         mae     = mean_absolute_error(actual_future, pred_future)
         rmse    = np.sqrt(mean_squared_error(actual_future, pred_future))
         r2      = r2_score(actual_future, pred_future)
         tr_pred_future = df_train["heatsink_temp_C"].values + mlp.predict(X_train_s)
-        tr_mae  = mean_absolute_error(df_train["temp_future_1s"].values, tr_pred_future)
+        tr_mae  = mean_absolute_error(df_train["temp_future_3s"].values, tr_pred_future)
 
         print(f"    {arch_name:<16s} {str(hidden):<14s} params={hw['params']:<5d} "
               f"MAE={mae:.4f}C  RMSE={rmse:.4f}C  R2={r2:.4f}  "
@@ -246,7 +246,7 @@ def train_and_export_best(df: pd.DataFrame, results: list) -> tuple:
                        tol=1e-7, random_state=42)
     mlp.fit(X, y)
     full_pred_future = df_aug["heatsink_temp_C"].values + mlp.predict(X)
-    full_mae = mean_absolute_error(df_aug["temp_future_1s"].values, full_pred_future)
+    full_mae = mean_absolute_error(df_aug["temp_future_3s"].values, full_pred_future)
     print(f"  Full dataset refit MAE: {full_mae:.4f}C")
 
     joblib.dump({"model": mlp, "scaler": scaler, "features": FEATURES,
@@ -297,7 +297,7 @@ def _export_c_code(mlp, scaler, hidden, best):
         " *\n"
         f" * Architecture: {' -> '.join(str(s) for s in layer_sizes)}\n"
         f" * Parameters:   {best['params']} floats ({best['flash_bytes']} bytes Flash)\n"
-        " * Target:        Future heatsink temperature +1s ahead (centi-degC)\n"
+        " * Target:        Future heatsink temperature +3s ahead (centi-degC)\n"
         " *\n"
         " * Features (ALL stateless -- no elapsed_time counter required):\n"
         " *   [0] heatsink_temp_C  -- current heatsink temperature\n"
@@ -321,7 +321,7 @@ def _export_c_code(mlp, scaler, hidden, best):
         "#include <stdint.h>\n"
         "\n"
         "/*\n"
-        " * Predict heatsink temperature 1 second into the future.\n"
+        " * Predict heatsink temperature 3 seconds into the future.\n"
         " *\n"
         " * Inputs (centi-units, e.g. 3350 = 33.50):\n"
         " *   hs_cC     -- current heatsink temperature  (centi-degC)\n"
@@ -329,7 +329,7 @@ def _export_c_code(mlp, scaler, hidden, best):
         " *   ploss_cmW -- regulator power dissipation   (centi-mW = mW*100)\n"
         " *   i_cmA     -- regulator output current      (centi-mA = mA*100)\n"
         " *\n"
-        " * Returns: predicted future heatsink temperature (+1s) in centi-degC\n"
+        " * Returns: predicted future heatsink temperature (+3s) in centi-degC\n"
         " *\n"
         " * NOTE: Starting mid-heating is fully supported -- no internal state.\n"
         " */\n"
@@ -477,7 +477,7 @@ def plot_results(results, df_train, df_test, best_mlp, best_scaler):
     # Panel 3: Actual vs Predicted (best model)
     ax = axes[1, 0]
     Xt = best_scaler.transform(df_test[FEATURES].values)
-    yt = df_test["temp_future_1s"].values
+    yt = df_test["temp_future_3s"].values
     yp = df_test["heatsink_temp_C"].values + best_mlp.predict(Xt)
     ax.scatter(yt, yp, alpha=0.3, s=8, c="#1E88E5", edgecolors="none")
     mn, mx = min(yt.min(), yp.min()), max(yt.max(), yp.max())

@@ -19,6 +19,7 @@ Run:
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 import csv
 import logging
 import os
@@ -141,6 +142,9 @@ class TelemetryState:
         self.clean_t_pred: float | None = None
         self.pred_glitch_cnt: int = 0
 
+        # 3-second lookahead prediction verification buffer (6 samples @ 500 ms)
+        self.pred_buffer: deque[float] = deque(maxlen=7)
+
     def filter_temperatures(self, t_meas: float, t_pred: float) -> tuple[float, float]:
         """
         Anti-glitch freezing filter:
@@ -259,6 +263,15 @@ def parse_frame(raw_line: str) -> dict | None:
     # Anti-glitch freeze filter: suppress temperature fluctuations >= 10.0 °C lasting <= 2 samples
     t_meas, t_pred = state.filter_temperatures(t_meas, t_pred)
 
+    # 3-second lookahead error (evaluates prediction made 6 samples = 3.0s ago against current measurement)
+    with state.lock:
+        state.pred_buffer.append(t_pred)
+        if len(state.pred_buffer) >= 6:
+            past_pred = state.pred_buffer[0]
+            tracking_error = round(abs(t_meas - past_pred), 3)
+        else:
+            tracking_error = round(abs(t_meas - t_pred), 3)
+
     return {
         "timestamp_ms": ts,
         "V_in": round(v_in, 3),
@@ -272,7 +285,7 @@ def parse_frame(raw_line: str) -> dict | None:
         "fault_code": fault,
         "faults": decode_faults(fault),
         "V_drop": v_drop,
-        "tracking_error": round(abs(t_meas - t_pred), 3),
+        "tracking_error": tracking_error,
         "R_theta_JA": round(
             (t_meas - t_amb) / (p_mw / 1000.0), 3
         ) if p_mw > 0 else None,

@@ -180,7 +180,7 @@ c_code = f"""/*
  * mlp_model_new.c -- 6-Mode TinyML Stateless Thermal Predictor for STM32F401RET6
  * Architecture: {NI} Inputs -> {NH} Neurons (ReLU) -> 1 Output (Linear)
  * Features: [heatsink_temp_C, ambient_temp_C, power_loss_mW, current_mA]
- * Target: Future Heatsink Temperature +1s ahead (centi-degC)
+ * Target: Future Heatsink Temperature +3s ahead (centi-degC)
  *
  * ALL 6 MODES ARE SIMULTANEOUSLY COMPILED INTO THIS FILE.
  */

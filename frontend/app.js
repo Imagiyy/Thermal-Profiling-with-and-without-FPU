@@ -97,6 +97,10 @@ let malformedCount = 0;
 let latencySum   = 0;
 let latencyCount = 0;
 
+// 3-second lookahead verification buffer (6 samples @ 500 ms)
+const LOOKAHEAD_SAMPLES = 6;
+const predLookaheadBuffer = [];
+
 // Complete session telemetry buffer for CSV export (all 9 raw values + derived metrics)
 const sessionTelemetryLog = [];
 
@@ -202,8 +206,7 @@ const thermalChart = new Chart(thermalCtx, {
         fill: false,
       },
       {
-        // [10s Prediction]: label: "T predicted (made 10 s earlier)",
-        label: "T predicted (made 1 s earlier)",
+        label: "T predicted (+3 s lookahead)",
         data: [],
         borderColor: CHART_COLORS.predicted,
         backgroundColor: "rgba(163,230,53,.08)",
@@ -512,7 +515,15 @@ function handleTelemetry(d) {
   // ── Transient Glitch Filter (Freezes display if temp fluctuates >= 10 °C for <= 2 points) ──
   d.T_measured = filterTempGlitch("meas", d.T_measured);
   d.T_predicted = filterTempGlitch("pred", d.T_predicted);
-  d.tracking_error = Math.abs(d.T_measured - d.T_predicted);
+
+  // ── 3-Second Lookahead Error: Compare current ground truth with prediction made 3 s ago ──
+  predLookaheadBuffer.push(d.T_predicted);
+  if (predLookaheadBuffer.length > LOOKAHEAD_SAMPLES) {
+    const pastPred = predLookaheadBuffer.shift();
+    d.tracking_error = Math.abs(d.T_measured - pastPred);
+  } else {
+    d.tracking_error = Math.abs(d.T_measured - d.T_predicted);
+  }
 
   const ts = d.timestamp_ms;
 
@@ -822,6 +833,7 @@ async function doConnect() {
     if (res.ok) {
       setConnectionUI(true);
       // Reset session metrics
+      predLookaheadBuffer.length = 0;
       errorSum = errorSqSum = errorCount = frameCount = malformedCount = 0;
       latencySum = latencyCount = 0;
     } else {
@@ -924,6 +936,7 @@ async function resetWholePage() {
   latencyCount = 0;
   currentLatestTs = 0;
   sessionTelemetryLog.length = 0;
+  predLookaheadBuffer.length = 0;
   sessionStart = null;
 
   // Reset all top row KPI cards
