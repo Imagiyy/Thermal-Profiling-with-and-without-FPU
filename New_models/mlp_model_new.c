@@ -4,10 +4,7 @@
  * Features: [heatsink_temp_C, ambient_temp_C, power_loss_mW, current_mA]
  * Target: Future Heatsink Temperature +1s ahead (centi-degC)
  *
- * Optimizations:
- *   - Method 2: ARM Cortex-M4 DSP SIMD (smlad - Dual 16-bit MAC in 1 cycle)
- *   - Method 3: Loop unrolling & register caching
- *   - Method 4: Dynamic ReLU zero-skipping
+ * ALL 6 MODES ARE SIMULTANEOUSLY COMPILED INTO THIS FILE.
  */
 
 #include "mlp_model_new.h"
@@ -59,8 +56,6 @@ static inline float fp16_to_fp32(uint16_t h)
 /* ==============================================================================
  * MODE 0: 32-BIT FLOAT WITH HARDWARE FPU (FP32)
  * ============================================================================== */
-#if (BENCHMARK_MODE == MODE_32BIT_FPU)
-
 static const float scaler_mean[4] = {
      63.71195984f,  31.25789261f,  2330.16552734f,  537.22021484f
 };
@@ -102,8 +97,8 @@ static const float b1[1] = {
     1.23477602f
 };
 
-int32_t mlp_new_predict_temp_cC(int32_t hs_cC, int32_t amb_cC,
-                                 int32_t ploss_cmW, int32_t i_cmA)
+int32_t mlp_new_predict_mode0_fp32(int32_t hs_cC, int32_t amb_cC,
+                                   int32_t ploss_cmW, int32_t i_cmA)
 {
     if (amb_cC <= 1000 || amb_cC >= 5500) {
         amb_cC = 2500;
@@ -137,8 +132,6 @@ int32_t mlp_new_predict_temp_cC(int32_t hs_cC, int32_t amb_cC,
 /* ==============================================================================
  * MODE 1: 32-BIT INTEGER -- NORMAL FIXED-POINT (Division / 10000)
  * ============================================================================== */
-#elif (BENCHMARK_MODE == MODE_32BIT_FIXED_NORMAL)
-
 #define SCALE_NORMAL_32 10000LL
 
 static const int32_t norm_mean_c[4]  = { 6371, 3126, 233017, 53722 };
@@ -176,8 +169,8 @@ static const int32_t W1_n32[32] = {
 };
 static const int32_t b1_n32[1] = { 12348 };
 
-int32_t mlp_new_predict_temp_cC(int32_t hs_cC, int32_t amb_cC,
-                                 int32_t ploss_cmW, int32_t i_cmA)
+int32_t mlp_new_predict_mode1_int32_norm(int32_t hs_cC, int32_t amb_cC,
+                                        int32_t ploss_cmW, int32_t i_cmA)
 {
     if (amb_cC <= 1000 || amb_cC >= 5500) {
         amb_cC = 2500;
@@ -218,8 +211,6 @@ int32_t mlp_new_predict_temp_cC(int32_t hs_cC, int32_t amb_cC,
 /* ==============================================================================
  * MODE 2: 32-BIT INTEGER -- POWER-OF-2 (Bit-Shift >> 16)
  * ============================================================================== */
-#elif (BENCHMARK_MODE == MODE_32BIT_FIXED_POT)
-
 #define SHIFT_POT_32 16
 
 static const int32_t pot_mean_c[4]  = { 6371, 3126, 233017, 53722 };
@@ -257,8 +248,8 @@ static const int32_t W1_p32[32] = {
 };
 static const int32_t b1_p32[1] = { 80922 };
 
-int32_t mlp_new_predict_temp_cC(int32_t hs_cC, int32_t amb_cC,
-                                 int32_t ploss_cmW, int32_t i_cmA)
+int32_t mlp_new_predict_mode2_int32_pot(int32_t hs_cC, int32_t amb_cC,
+                                       int32_t ploss_cmW, int32_t i_cmA)
 {
     if (amb_cC <= 1000 || amb_cC >= 5500) {
         amb_cC = 2500;
@@ -299,15 +290,6 @@ int32_t mlp_new_predict_temp_cC(int32_t hs_cC, int32_t amb_cC,
 /* ==============================================================================
  * MODE 3: 16-BIT FLOAT WITH HARDWARE FPU (FP16 Storage -> FP32 Compute)
  * ============================================================================== */
-#elif (BENCHMARK_MODE == MODE_16BIT_FPU)
-
-static const float scaler_mean[4] = {
-     63.71195984f,  31.25789261f,  2330.16552734f,  537.22021484f
-};
-static const float scaler_scale[4] = {
-     17.56591797f,  8.12421036f,  925.26922607f,  225.02209473f
-};
-
 static const uint16_t W0_f16[128] = {
     0xBC21U, 0x3C26U, 0x38BDU, 0x3E01U, 0xB811U, 0xB60DU, 0x38DBU, 0x8000U,
     0x8000U, 0x3999U, 0x2DF4U, 0x2FEAU, 0x3F14U, 0xB8FCU, 0xB0DDU, 0xB8F4U,
@@ -342,8 +324,8 @@ static const uint16_t b1_f16[1] = {
     0x3CF0U
 };
 
-int32_t mlp_new_predict_temp_cC(int32_t hs_cC, int32_t amb_cC,
-                                 int32_t ploss_cmW, int32_t i_cmA)
+int32_t mlp_new_predict_mode3_fp16(int32_t hs_cC, int32_t amb_cC,
+                                  int32_t ploss_cmW, int32_t i_cmA)
 {
     if (amb_cC <= 1000 || amb_cC >= 5500) {
         amb_cC = 2500;
@@ -377,12 +359,7 @@ int32_t mlp_new_predict_temp_cC(int32_t hs_cC, int32_t amb_cC,
 /* ==============================================================================
  * MODE 4: 16-BIT INTEGER -- NORMAL FIXED-POINT (Division / 2048)
  * ============================================================================== */
-#elif (BENCHMARK_MODE == MODE_16BIT_FIXED_NORMAL)
-
 #define SCALE_NORMAL_16 2048
-
-static const int32_t norm_mean_c[4]  = { 6371, 3126, 233017, 53722 };
-static const int32_t norm_scale_c[4] = { 1757, 812, 92527, 22502 };
 
 static const int16_t W0_n16[128] = {
         -2113,      2124,      1213,      3074,     -1041,      -774,      1243,         0,
@@ -416,8 +393,8 @@ static const int16_t W1_n16[32] = {
 };
 static const int32_t b1_n16[1] = { 2529 };
 
-int32_t mlp_new_predict_temp_cC(int32_t hs_cC, int32_t amb_cC,
-                                 int32_t ploss_cmW, int32_t i_cmA)
+int32_t mlp_new_predict_mode4_int16_norm(int32_t hs_cC, int32_t amb_cC,
+                                        int32_t ploss_cmW, int32_t i_cmA)
 {
     if (amb_cC <= 1000 || amb_cC >= 5500) {
         amb_cC = 2500;
@@ -458,12 +435,7 @@ int32_t mlp_new_predict_temp_cC(int32_t hs_cC, int32_t amb_cC,
 /* ==============================================================================
  * MODE 5: 16-BIT INTEGER -- POT (>> 11) + ARM SMLAD SIMD
  * ============================================================================== */
-#elif (BENCHMARK_MODE == MODE_16BIT_FIXED_POT_SIMD)
-
 #define SHIFT_POT_16 11
-
-static const int32_t pot_mean_c[4]  = { 6371, 3126, 233017, 53722 };
-static const int32_t pot_scale_c[4] = { 1757, 812, 92527, 22502 };
 
 /* Packed 16-bit weight pairs for SMLAD: input pair [0,1] */
 static const uint32_t W0_simd_01[32] = {
@@ -502,8 +474,8 @@ static const uint32_t W1_simd[16] = {
 };
 static const int32_t b1_simd[1] = { 2529 };
 
-int32_t mlp_new_predict_temp_cC(int32_t hs_cC, int32_t amb_cC,
-                                 int32_t ploss_cmW, int32_t i_cmA)
+int32_t mlp_new_predict_mode5_int16_simd(int32_t hs_cC, int32_t amb_cC,
+                                        int32_t ploss_cmW, int32_t i_cmA)
 {
     if (amb_cC <= 1000 || amb_cC >= 5500) {
         amb_cC = 2500;
@@ -545,4 +517,25 @@ int32_t mlp_new_predict_temp_cC(int32_t hs_cC, int32_t amb_cC,
     return (int32_t)(((int64_t)out_acc * 100LL) >> SHIFT_POT_16);
 }
 
+/* ==============================================================================
+ * MASTER ENTRYPOINT DISPATCHER
+ * ============================================================================== */
+int32_t mlp_new_predict_temp_cC(int32_t hs_cC, int32_t amb_cC,
+                                 int32_t ploss_cmW, int32_t i_cmA)
+{
+#if (BENCHMARK_MODE == MODE_32BIT_FPU)
+    return mlp_new_predict_mode0_fp32(hs_cC, amb_cC, ploss_cmW, i_cmA);
+#elif (BENCHMARK_MODE == MODE_32BIT_FIXED_NORMAL)
+    return mlp_new_predict_mode1_int32_norm(hs_cC, amb_cC, ploss_cmW, i_cmA);
+#elif (BENCHMARK_MODE == MODE_32BIT_FIXED_POT)
+    return mlp_new_predict_mode2_int32_pot(hs_cC, amb_cC, ploss_cmW, i_cmA);
+#elif (BENCHMARK_MODE == MODE_16BIT_FPU)
+    return mlp_new_predict_mode3_fp16(hs_cC, amb_cC, ploss_cmW, i_cmA);
+#elif (BENCHMARK_MODE == MODE_16BIT_FIXED_NORMAL)
+    return mlp_new_predict_mode4_int16_norm(hs_cC, amb_cC, ploss_cmW, i_cmA);
+#elif (BENCHMARK_MODE == MODE_16BIT_FIXED_POT_SIMD)
+    return mlp_new_predict_mode5_int16_simd(hs_cC, amb_cC, ploss_cmW, i_cmA);
+#else
+    return mlp_new_predict_mode5_int16_simd(hs_cC, amb_cC, ploss_cmW, i_cmA);
 #endif
+}
