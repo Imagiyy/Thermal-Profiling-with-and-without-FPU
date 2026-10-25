@@ -1,14 +1,21 @@
 {
   "best_model": {
-    "name": "small_16",
+    "name": "small_32",
     "hidden_layers": [
-      16
+      32
     ],
-    "holdout_test_mae": 0.3511,
-    "holdout_test_r2": 0.9988,
-    "full_dataset_mae": 0.2871,
-    "parameters": 97,
-    "est_latency_us": 15.0,
-    "flash_bytes": 388
+    "features": [
+      "heatsink_temp_C",
+      "ambient_temp_C",
+      "power_loss_mW",
+      "current_mA"
+    ],
+    "holdout_test_mae": 0.2377,
+    "holdout_test_rmse": 0.3062,
+    "holdout_test_r2": 0.9995,
+    "full_dataset_mae": 0.1514,
+    "parameters": 193,
+    "est_latency_us": 60.0,
+    "flash_bytes": 772
   }
 }
