@@ -1,4 +1,4 @@
-﻿import json
+import json
 import numpy as np
 
 # Load scaler and weights for mlp_model_new (4-input stateless model)
@@ -8,7 +8,7 @@ with open('New_models/mlp_weights_new.json') as f:
     weights = json.load(f)
 
 n_inputs = len(scaler['mean'])          # 4
-n_hidden = weights['layers'][0]['weights_shape'][1]  # e.g. 8
+n_hidden = weights['layers'][0]['weights_shape'][1]  # 32
 
 mean  = np.array(scaler['mean'],  dtype=np.float32)
 scale = np.array(scaler['scale'], dtype=np.float32)
@@ -17,10 +17,6 @@ W0 = np.array(weights['layers'][0]['weights'], dtype=np.float32)  # (n_inputs, n
 b0 = np.array(weights['layers'][0]['biases'],  dtype=np.float32)  # (n_hidden,)
 W1 = np.array(weights['layers'][1]['weights'], dtype=np.float32).flatten()  # (n_hidden,)
 b1 = np.array(weights['layers'][1]['biases'],  dtype=np.float32).flatten()  # (1,)
-
-print(f'n_inputs={n_inputs}, n_hidden={n_hidden}')
-print(f'W0 shape: {W0.shape}, b0 shape: {b0.shape}')
-print(f'W1 shape: {W1.shape}, b1 shape: {b1.shape}')
 
 S_N32 = 10000
 SHIFT_P32 = 16
@@ -60,13 +56,11 @@ b0_n16 = np.round(b0 * S_N16).astype(int)
 W1_n16 = np.round(W1 * S_N16).astype(np.int16).flatten()
 b1_n16 = np.round(b1 * S_N16).astype(int)
 
-W0_p16 = np.round(W0 * S_P16).astype(np.int16)  # (n_inputs, n_hidden)
+W0_p16 = np.round(W0 * S_P16).astype(np.int16)
 b0_p16 = np.round(b0 * S_P16).astype(int)
-W1_p16 = np.round(W1 * S_P16).astype(np.int16).flatten()  # (n_hidden,)
+W1_p16 = np.round(W1 * S_P16).astype(np.int16).flatten()
 b1_p16 = np.round(b1 * S_P16).astype(int)
 
-# Pack SIMD pairs for Layer 0 (pair inputs)
-# For n_inputs=4: pack as pair_01 and pair_23
 W0_simd_01 = []
 W0_simd_23 = []
 for j in range(n_hidden):
@@ -77,7 +71,6 @@ for j in range(n_hidden):
     W0_simd_01.append((w1 << 16) | w0)
     W0_simd_23.append((w3 << 16) | w2)
 
-# Pack W1 SIMD: pairs of n_hidden neurons
 W1_simd = []
 for k in range(0, n_hidden, 2):
     w0 = int(W1_p16[k])   & 0xFFFF
@@ -122,24 +115,8 @@ header_code = f"""/*
  * Architecture: {NI} inputs -> {NH} neurons (ReLU) -> 1 output (Linear)
  * Features: [heatsink_temp_C, ambient_temp_C, power_loss_mW, current_mA]
  *
- * WHY 4 inputs (not 2+elapsed_time):
- *   The previous model used elapsed_time (g_sample_count) which always
- *   started at 0 regardless of where in the heating curve prediction began.
- *   Starting mid-heating caused large errors. All 4 inputs here are available
- *   every sample loop with no internal counter -- fully stateless.
- *
- * 6 BENCHMARK CONFIGURATIONS:
- * ----------------------------------------------------------------------------
- * 32-BIT SUITE:
- *   MODE_32BIT_FPU            (0) -- 32-bit Float with Hardware FPU (FP32)
- *   MODE_32BIT_FIXED_NORMAL   (1) -- 32-bit Int: Normal division (/ 10000)
- *   MODE_32BIT_FIXED_POT      (2) -- 32-bit Int: Power-of-2 bit-shift (>> 16)
- *
- * 16-BIT SUITE (With DSP SIMD & Dynamic Sparsity Optimizations):
- *   MODE_16BIT_FPU            (3) -- 16-bit Float with HW FPU (FP16/FP32)
- *   MODE_16BIT_FIXED_NORMAL   (4) -- 16-bit Int: Normal division (/ 2048)
- *   MODE_16BIT_FIXED_POT_SIMD (5) -- 16-bit Int: PoT >> 11 + ARM SMLAD SIMD
- * ----------------------------------------------------------------------------
+ * All 6 modes are compiled into firmware simultaneously. You can call
+ * specific mode functions directly or use mlp_new_predict_temp_cC().
  */
 
 #ifndef MLP_MODEL_NEW_H
@@ -155,19 +132,19 @@ header_code = f"""/*
 #define MODE_16BIT_FIXED_POT_SIMD 5
 
 #ifndef BENCHMARK_MODE
-#define BENCHMARK_MODE            MODE_32BIT_FPU
+#define BENCHMARK_MODE            MODE_16BIT_FIXED_POT_SIMD
 #endif
 
-/*
- * Predict heatsink temperature 1 second ahead (centi-degC).
- * All inputs are stateless -- no elapsed_time counter needed.
- *   hs_cC     : current heatsink temp (centi-degC)
- *   amb_cC    : ambient temp          (centi-degC)
- *   ploss_cmW : power dissipation     (centi-mW = mW*100)
- *   i_cmA     : current               (centi-mA = mA*100)
- */
-int32_t mlp_new_predict_temp_cC(int32_t hs_cC, int32_t amb_cC,
-                                 int32_t ploss_cmW, int32_t i_cmA);
+/* Individual mode inference entrypoints */
+int32_t mlp_new_predict_mode0_fp32(int32_t hs_cC, int32_t amb_cC, int32_t ploss_cmW, int32_t i_cmA);
+int32_t mlp_new_predict_mode1_int32_norm(int32_t hs_cC, int32_t amb_cC, int32_t ploss_cmW, int32_t i_cmA);
+int32_t mlp_new_predict_mode2_int32_pot(int32_t hs_cC, int32_t amb_cC, int32_t ploss_cmW, int32_t i_cmA);
+int32_t mlp_new_predict_mode3_fp16(int32_t hs_cC, int32_t amb_cC, int32_t ploss_cmW, int32_t i_cmA);
+int32_t mlp_new_predict_mode4_int16_norm(int32_t hs_cC, int32_t amb_cC, int32_t ploss_cmW, int32_t i_cmA);
+int32_t mlp_new_predict_mode5_int16_simd(int32_t hs_cC, int32_t amb_cC, int32_t ploss_cmW, int32_t i_cmA);
+
+/* Master dispatcher entrypoint (dispatches based on BENCHMARK_MODE) */
+int32_t mlp_new_predict_temp_cC(int32_t hs_cC, int32_t amb_cC, int32_t ploss_cmW, int32_t i_cmA);
 
 #endif /* MLP_MODEL_NEW_H */
 """
@@ -175,28 +152,20 @@ int32_t mlp_new_predict_temp_cC(int32_t hs_cC, int32_t amb_cC,
 with open('New_models/mlp_model_new.h', 'w', encoding='utf-8') as f:
     f.write(header_code)
 
-func_sig = (
-    f"int32_t mlp_new_predict_temp_cC(int32_t hs_cC, int32_t amb_cC,\n"
-    f"                                 int32_t ploss_cmW, int32_t i_cmA)"
-)
 amb_clamp = (
     "    if (amb_cC <= 1000 || amb_cC >= 5500) {\n"
     "        amb_cC = 2500;\n"
     "    }"
 )
 
-def gen_x_f32(mean, scale):
-    lines = []
-    for i in range(NI):
-        if i == 0:
-            lines.append(f"    x[0] = (((float)hs_cC     / 100.0f) - scaler_mean[0]) / scaler_scale[0];")
-        elif i == 1:
-            lines.append(f"    x[1] = (((float)amb_cC    / 100.0f) - scaler_mean[1]) / scaler_scale[1];")
-        elif i == 2:
-            lines.append(f"    x[2] = (((float)ploss_cmW / 100.0f) - scaler_mean[2]) / scaler_scale[2];")
-        elif i == 3:
-            lines.append(f"    x[3] = (((float)i_cmA     / 100.0f) - scaler_mean[3]) / scaler_scale[3];")
-    return '\n'.join(lines)
+def gen_x_f32():
+    return (
+        "    float x[4];\n"
+        "    x[0] = (((float)hs_cC     / 100.0f) - scaler_mean[0]) / scaler_scale[0];\n"
+        "    x[1] = (((float)amb_cC    / 100.0f) - scaler_mean[1]) / scaler_scale[1];\n"
+        "    x[2] = (((float)ploss_cmW / 100.0f) - scaler_mean[2]) / scaler_scale[2];\n"
+        "    x[3] = (((float)i_cmA     / 100.0f) - scaler_mean[3]) / scaler_scale[3];"
+    )
 
 def gen_x_int():
     return (
@@ -213,10 +182,7 @@ c_code = f"""/*
  * Features: [heatsink_temp_C, ambient_temp_C, power_loss_mW, current_mA]
  * Target: Future Heatsink Temperature +1s ahead (centi-degC)
  *
- * Optimizations:
- *   - Method 2: ARM Cortex-M4 DSP SIMD (smlad - Dual 16-bit MAC in 1 cycle)
- *   - Method 3: Loop unrolling & register caching
- *   - Method 4: Dynamic ReLU zero-skipping
+ * ALL 6 MODES ARE SIMULTANEOUSLY COMPILED INTO THIS FILE.
  */
 
 #include "mlp_model_new.h"
@@ -225,10 +191,10 @@ c_code = f"""/*
 
 static inline int32_t smlad_dual(uint32_t x_pair, uint32_t w_pair, int32_t acc)
 {{
-#if defined(__arm__) || defined(__thumb__)
-    __asm__ volatile ("smlad %0, %1, %2, %3"
-                      : "=r" (acc)
-                      : "r" (x_pair), "r" (w_pair), "r" (acc));
+#if defined(__arm__) || defined(__thumb__) || defined(__thumb2__)
+    __asm__ volatile ("smlad %0, %1, %2, %0"
+                      : "+r" (acc)
+                      : "r" (x_pair), "r" (w_pair));
     return acc;
 #else
     int16_t x0 = (int16_t)(x_pair & 0xFFFFU);
@@ -268,8 +234,6 @@ static inline float fp16_to_fp32(uint16_t h)
 /* ==============================================================================
  * MODE 0: 32-BIT FLOAT WITH HARDWARE FPU (FP32)
  * ============================================================================== */
-#if (BENCHMARK_MODE == MODE_32BIT_FPU)
-
 static const float scaler_mean[{NI}] = {{
 {fmt_arr_f(mean)}
 }};
@@ -290,12 +254,12 @@ static const float b1[1] = {{
     {b1_f32[0]:.8f}f
 }};
 
-{func_sig}
+int32_t mlp_new_predict_mode0_fp32(int32_t hs_cC, int32_t amb_cC,
+                                   int32_t ploss_cmW, int32_t i_cmA)
 {{
 {amb_clamp}
 
-    float x[{NI}];
-{gen_x_f32(mean, scale)}
+{gen_x_f32()}
 
     float h[{NH}];
     for (int j = 0; j < {NH}; j++) {{
@@ -319,8 +283,6 @@ static const float b1[1] = {{
 /* ==============================================================================
  * MODE 1: 32-BIT INTEGER -- NORMAL FIXED-POINT (Division / 10000)
  * ============================================================================== */
-#elif (BENCHMARK_MODE == MODE_32BIT_FIXED_NORMAL)
-
 #define SCALE_NORMAL_32 10000LL
 
 static const int32_t norm_mean_c[{NI}]  = {{ {', '.join(str(x) for x in mean_c)} }};
@@ -337,7 +299,8 @@ static const int32_t W1_n32[{NH}] = {{
 }};
 static const int32_t b1_n32[1] = {{ {b1_n32[0]} }};
 
-{func_sig}
+int32_t mlp_new_predict_mode1_int32_norm(int32_t hs_cC, int32_t amb_cC,
+                                        int32_t ploss_cmW, int32_t i_cmA)
 {{
 {amb_clamp}
 
@@ -372,8 +335,6 @@ static const int32_t b1_n32[1] = {{ {b1_n32[0]} }};
 /* ==============================================================================
  * MODE 2: 32-BIT INTEGER -- POWER-OF-2 (Bit-Shift >> 16)
  * ============================================================================== */
-#elif (BENCHMARK_MODE == MODE_32BIT_FIXED_POT)
-
 #define SHIFT_POT_32 16
 
 static const int32_t pot_mean_c[{NI}]  = {{ {', '.join(str(x) for x in mean_c)} }};
@@ -390,7 +351,8 @@ static const int32_t W1_p32[{NH}] = {{
 }};
 static const int32_t b1_p32[1] = {{ {b1_p32[0]} }};
 
-{func_sig}
+int32_t mlp_new_predict_mode2_int32_pot(int32_t hs_cC, int32_t amb_cC,
+                                       int32_t ploss_cmW, int32_t i_cmA)
 {{
 {amb_clamp}
 
@@ -425,15 +387,6 @@ static const int32_t b1_p32[1] = {{ {b1_p32[0]} }};
 /* ==============================================================================
  * MODE 3: 16-BIT FLOAT WITH HARDWARE FPU (FP16 Storage -> FP32 Compute)
  * ============================================================================== */
-#elif (BENCHMARK_MODE == MODE_16BIT_FPU)
-
-static const float scaler_mean[{NI}] = {{
-{fmt_arr_f(mean)}
-}};
-static const float scaler_scale[{NI}] = {{
-{fmt_arr_f(scale)}
-}};
-
 static const uint16_t W0_f16[{NI * NH}] = {{
 {fmt_arr_u16(W0_f16)}
 }};
@@ -447,12 +400,12 @@ static const uint16_t b1_f16[1] = {{
     0x{b1_f16[0]:04X}U
 }};
 
-{func_sig}
+int32_t mlp_new_predict_mode3_fp16(int32_t hs_cC, int32_t amb_cC,
+                                  int32_t ploss_cmW, int32_t i_cmA)
 {{
 {amb_clamp}
 
-    float x[{NI}];
-{gen_x_f32(mean, scale)}
+{gen_x_f32()}
 
     float h[{NH}];
     for (int j = 0; j < {NH}; j++) {{
@@ -476,12 +429,7 @@ static const uint16_t b1_f16[1] = {{
 /* ==============================================================================
  * MODE 4: 16-BIT INTEGER -- NORMAL FIXED-POINT (Division / 2048)
  * ============================================================================== */
-#elif (BENCHMARK_MODE == MODE_16BIT_FIXED_NORMAL)
-
 #define SCALE_NORMAL_16 2048
-
-static const int32_t norm_mean_c[{NI}]  = {{ {', '.join(str(x) for x in mean_c)} }};
-static const int32_t norm_scale_c[{NI}] = {{ {', '.join(str(x) for x in scale_c)} }};
 
 static const int16_t W0_n16[{NI * NH}] = {{
 {fmt_arr(W0_n16)}
@@ -494,7 +442,8 @@ static const int16_t W1_n16[{NH}] = {{
 }};
 static const int32_t b1_n16[1] = {{ {b1_n16[0]} }};
 
-{func_sig}
+int32_t mlp_new_predict_mode4_int16_norm(int32_t hs_cC, int32_t amb_cC,
+                                        int32_t ploss_cmW, int32_t i_cmA)
 {{
 {amb_clamp}
 
@@ -502,7 +451,7 @@ static const int32_t b1_n16[1] = {{ {b1_n16[0]} }};
     int16_t x_q[{NI}];
     for (int i = 0; i < {NI}; i++) {{
         int32_t diff = raw_c[i] - norm_mean_c[i];
-        x_q[i] = (int16_t)(((int64_t)diff * SCALE_NORMAL_16) / norm_scale_c[i]);
+        x_q[i] = (int16_t)((diff * SCALE_NORMAL_16) / norm_scale_c[i]);
     }}
 
     int16_t h_q[{NH}];
@@ -529,12 +478,7 @@ static const int32_t b1_n16[1] = {{ {b1_n16[0]} }};
 /* ==============================================================================
  * MODE 5: 16-BIT INTEGER -- POT (>> 11) + ARM SMLAD SIMD
  * ============================================================================== */
-#elif (BENCHMARK_MODE == MODE_16BIT_FIXED_POT_SIMD)
-
 #define SHIFT_POT_16 11
-
-static const int32_t pot_mean_c[{NI}]  = {{ {', '.join(str(x) for x in mean_c)} }};
-static const int32_t pot_scale_c[{NI}] = {{ {', '.join(str(x) for x in scale_c)} }};
 
 /* Packed 16-bit weight pairs for SMLAD: input pair [0,1] */
 static const uint32_t W0_simd_01[{NH}] = {{
@@ -553,7 +497,8 @@ static const uint32_t W1_simd[{NH // 2}] = {{
 }};
 static const int32_t b1_simd[1] = {{ {b1_p16[0]} }};
 
-{func_sig}
+int32_t mlp_new_predict_mode5_int16_simd(int32_t hs_cC, int32_t amb_cC,
+                                        int32_t ploss_cmW, int32_t i_cmA)
 {{
 {amb_clamp}
 
@@ -561,7 +506,7 @@ static const int32_t b1_simd[1] = {{ {b1_p16[0]} }};
     int16_t x_q[{NI}];
     for (int i = 0; i < {NI}; i++) {{
         int32_t diff = raw_c[i] - pot_mean_c[i];
-        x_q[i] = (int16_t)(((int64_t)diff << SHIFT_POT_16) / (int64_t)pot_scale_c[i]);
+        x_q[i] = (int16_t)((diff << SHIFT_POT_16) / pot_scale_c[i]);
     }}
 
     /* Pack 4 inputs into two 32-bit SIMD registers */
@@ -589,13 +534,31 @@ static const int32_t b1_simd[1] = {{ {b1_p16[0]} }};
     return (int32_t)(((int64_t)out_acc * 100LL) >> SHIFT_POT_16);
 }}
 
+/* ==============================================================================
+ * MASTER ENTRYPOINT DISPATCHER
+ * ============================================================================== */
+int32_t mlp_new_predict_temp_cC(int32_t hs_cC, int32_t amb_cC,
+                                 int32_t ploss_cmW, int32_t i_cmA)
+{{
+#if (BENCHMARK_MODE == MODE_32BIT_FPU)
+    return mlp_new_predict_mode0_fp32(hs_cC, amb_cC, ploss_cmW, i_cmA);
+#elif (BENCHMARK_MODE == MODE_32BIT_FIXED_NORMAL)
+    return mlp_new_predict_mode1_int32_norm(hs_cC, amb_cC, ploss_cmW, i_cmA);
+#elif (BENCHMARK_MODE == MODE_32BIT_FIXED_POT)
+    return mlp_new_predict_mode2_int32_pot(hs_cC, amb_cC, ploss_cmW, i_cmA);
+#elif (BENCHMARK_MODE == MODE_16BIT_FPU)
+    return mlp_new_predict_mode3_fp16(hs_cC, amb_cC, ploss_cmW, i_cmA);
+#elif (BENCHMARK_MODE == MODE_16BIT_FIXED_NORMAL)
+    return mlp_new_predict_mode4_int16_norm(hs_cC, amb_cC, ploss_cmW, i_cmA);
+#elif (BENCHMARK_MODE == MODE_16BIT_FIXED_POT_SIMD)
+    return mlp_new_predict_mode5_int16_simd(hs_cC, amb_cC, ploss_cmW, i_cmA);
+#else
+    return mlp_new_predict_mode5_int16_simd(hs_cC, amb_cC, ploss_cmW, i_cmA);
 #endif
+}}
 """
 
 with open('New_models/mlp_model_new.c', 'w', encoding='utf-8') as f:
     f.write(c_code)
 
-print("SUCCESS: Generated New_models/mlp_model_new.h and mlp_model_new.c with ALL 6 MODES!")
-print(f"  Architecture: {NI} inputs -> {NH} neurons -> 1 output")
-print(f"  Scaler mean:  {mean.tolist()}")
-print(f"  Scaler scale: {scale.tolist()}")
+print("SUCCESS: Generated New_models/mlp_model_new.h and mlp_model_new.c with ALL 6 MODES simultaneously compiled!")
