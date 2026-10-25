@@ -527,8 +527,8 @@ int32_t cnn_predict_temp_cC(int32_t ploss_cmW, int32_t i_cmA, int32_t amb_cC, in
 
 static inline int32_t smlad_dual(uint32_t val1, uint32_t val2, int32_t acc)
 {
-#if defined(__arm__) || defined(__thumb__) || defined(__thumb2__)
-    __asm__ volatile ("smlad %0, %1, %2, %0" : "+r" (acc) : "r" (val1), "r" (val2));
+#if defined(__arm__) || defined(__thumb__)
+    __asm__ ("smlad %0, %1, %2, %3" : "=r" (acc) : "r" (val1), "r" (val2), "r" (acc));
     return acc;
 #else
     int16_t v1_lo = (int16_t)(val1 & 0xFFFFU);

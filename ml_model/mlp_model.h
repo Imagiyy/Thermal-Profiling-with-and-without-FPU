@@ -34,7 +34,7 @@
 
 /* Set default active benchmark mode (0 to 5) or override via compiler flag -DBENCHMARK_MODE=X */
 #ifndef BENCHMARK_MODE
-#define BENCHMARK_MODE            MODE_16BIT_FIXED_POT_SIMD
+#define BENCHMARK_MODE            MODE_32BIT_FPU
 #endif
 
 int32_t cnn_predict_temp_cC(int32_t ploss_cmW, int32_t i_cmA,

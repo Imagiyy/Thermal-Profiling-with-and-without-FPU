@@ -38,7 +38,7 @@
 #define MODEL_MLP_NEW      1
 
 #ifndef ACTIVE_MODEL
-#define ACTIVE_MODEL       MODEL_MLP_ORIGINAL
+#define ACTIVE_MODEL       MODEL_MLP_NEW
 #endif
 
 /* Active model selection variable */
@@ -626,7 +626,7 @@ static int adc1_read_vout_mV(int32_t *vout_mV)
 /* ==================================== MAIN ================================ */
 int main(void)
 {
-#if (ACTIVE_MODEL == MODEL_MLP_NEW || (defined(BENCHMARK_MODE) && (BENCHMARK_MODE == 0 || BENCHMARK_MODE == 3)))
+#if (defined(BENCHMARK_MODE) && (BENCHMARK_MODE == 0 || BENCHMARK_MODE == 3))
     /* Hardware FPU enabled: Grant CP10 & CP11 Full Access */
     SCB->CPACR |= ((3UL << 20) | (3UL << 22));
 #else
@@ -635,13 +635,6 @@ int main(void)
 #endif
     __DSB();
     __ISB();
-
-    /* Runtime guarantee: if active_model is set to MODEL_MLP_NEW, enable hardware FPU */
-    if (active_model == MODEL_MLP_NEW) {
-        SCB->CPACR |= ((3UL << 20) | (3UL << 22));
-        __DSB();
-        __ISB();
-    }
 
     clock_init();
     gpio_init();
