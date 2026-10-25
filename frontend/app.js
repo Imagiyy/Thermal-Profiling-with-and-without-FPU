@@ -680,13 +680,13 @@ function handleTelemetry(d) {
   updateFaults(d.fault_code, d.faults);
 
   // ── Live readings ──
-  liveVin.textContent      = d.V_in.toFixed(3)   + " V";
-  liveVout.textContent     = d.V_out.toFixed(3)   + " V";
-  liveVdrop.textContent    = d.V_drop.toFixed(3)  + " V";
-  liveIload.textContent    = d.I_mA.toFixed(1)    + " mA";
-  livePdiss.textContent    = d.P_mW.toFixed(1)    + " mW";
-  liveTamb.textContent     = d.T_ambient.toFixed(2)  + " °C";
-  liveTmeas.textContent    = d.T_measured.toFixed(2) + " °C";
+  if (liveVin)   liveVin.textContent      = d.V_in.toFixed(3)   + " V";
+  if (liveVout)  liveVout.textContent     = d.V_out.toFixed(3)   + " V";
+  if (liveVdrop) liveVdrop.textContent    = d.V_drop.toFixed(3)  + " V";
+  if (liveIload) liveIload.textContent    = d.I_mA.toFixed(1)    + " mA";
+  if (livePdiss) livePdiss.textContent    = d.P_mW.toFixed(1)    + " mW";
+  if (liveTamb)  liveTamb.textContent     = d.T_ambient.toFixed(2)  + " °C";
+  if (liveTmeas) liveTmeas.textContent    = d.T_measured.toFixed(2) + " °C";
   if (liveTpred3s)  liveTpred3s.textContent  = d.T_predicted_3s.toFixed(2)  + " °C";
   if (liveTpred10s) liveTpred10s.textContent = d.T_predicted_10s.toFixed(2) + " °C";
 }

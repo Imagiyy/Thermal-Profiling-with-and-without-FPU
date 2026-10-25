@@ -102,12 +102,20 @@ __attribute__((weak)) int32_t cnn_predict_temp_cC(int32_t ploss_cmW, int32_t i_c
     return hs_cC;
 }
 
-__attribute__((weak)) int32_t mlp_new_predict_mode0_fp32(int32_t hs_cC, int32_t amb_cC, int32_t ploss_cmW, int32_t i_cmA) { (void)amb_cC; (void)ploss_cmW; (void)i_cmA; return hs_cC; }
-__attribute__((weak)) int32_t mlp_new_predict_mode1_int32_norm(int32_t hs_cC, int32_t amb_cC, int32_t ploss_cmW, int32_t i_cmA) { (void)amb_cC; (void)ploss_cmW; (void)i_cmA; return hs_cC; }
-__attribute__((weak)) int32_t mlp_new_predict_mode2_int32_pot(int32_t hs_cC, int32_t amb_cC, int32_t ploss_cmW, int32_t i_cmA) { (void)amb_cC; (void)ploss_cmW; (void)i_cmA; return hs_cC; }
-__attribute__((weak)) int32_t mlp_new_predict_mode3_fp16(int32_t hs_cC, int32_t amb_cC, int32_t ploss_cmW, int32_t i_cmA) { (void)amb_cC; (void)ploss_cmW; (void)i_cmA; return hs_cC; }
-__attribute__((weak)) int32_t mlp_new_predict_mode4_int16_norm(int32_t hs_cC, int32_t amb_cC, int32_t ploss_cmW, int32_t i_cmA) { (void)amb_cC; (void)ploss_cmW; (void)i_cmA; return hs_cC; }
-__attribute__((weak)) int32_t mlp_new_predict_mode5_int16_simd(int32_t hs_cC, int32_t amb_cC, int32_t ploss_cmW, int32_t i_cmA) { (void)amb_cC; (void)ploss_cmW; (void)i_cmA; return hs_cC; }
+#ifndef MLP_MODEL_NEW_H
+typedef struct {
+    int32_t pred_3s_cC;
+    int32_t pred_10s_cC;
+} mlp_prediction_t;
+#endif
+
+__attribute__((weak)) mlp_prediction_t mlp_new_predict_mode0_fp32(int32_t hs_cC, int32_t amb_cC, int32_t ploss_cmW, int32_t i_cmA) { (void)amb_cC; (void)ploss_cmW; (void)i_cmA; return (mlp_prediction_t){hs_cC, hs_cC}; }
+__attribute__((weak)) mlp_prediction_t mlp_new_predict_mode1_int32_norm(int32_t hs_cC, int32_t amb_cC, int32_t ploss_cmW, int32_t i_cmA) { (void)amb_cC; (void)ploss_cmW; (void)i_cmA; return (mlp_prediction_t){hs_cC, hs_cC}; }
+__attribute__((weak)) mlp_prediction_t mlp_new_predict_mode2_int32_pot(int32_t hs_cC, int32_t amb_cC, int32_t ploss_cmW, int32_t i_cmA) { (void)amb_cC; (void)ploss_cmW; (void)i_cmA; return (mlp_prediction_t){hs_cC, hs_cC}; }
+__attribute__((weak)) mlp_prediction_t mlp_new_predict_mode3_fp16(int32_t hs_cC, int32_t amb_cC, int32_t ploss_cmW, int32_t i_cmA) { (void)amb_cC; (void)ploss_cmW; (void)i_cmA; return (mlp_prediction_t){hs_cC, hs_cC}; }
+__attribute__((weak)) mlp_prediction_t mlp_new_predict_mode4_int16_norm(int32_t hs_cC, int32_t amb_cC, int32_t ploss_cmW, int32_t i_cmA) { (void)amb_cC; (void)ploss_cmW; (void)i_cmA; return (mlp_prediction_t){hs_cC, hs_cC}; }
+__attribute__((weak)) mlp_prediction_t mlp_new_predict_mode5_int16_simd(int32_t hs_cC, int32_t amb_cC, int32_t ploss_cmW, int32_t i_cmA) { (void)amb_cC; (void)ploss_cmW; (void)i_cmA; return (mlp_prediction_t){hs_cC, hs_cC}; }
+__attribute__((weak)) mlp_prediction_t mlp_new_predict_dual_cC(int32_t hs_cC, int32_t amb_cC, int32_t ploss_cmW, int32_t i_cmA) { (void)amb_cC; (void)ploss_cmW; (void)i_cmA; return (mlp_prediction_t){hs_cC, hs_cC}; }
 __attribute__((weak)) int32_t mlp_new_predict_temp_cC(int32_t hs_cC, int32_t amb_cC,
                                                        int32_t ploss_cmW, int32_t i_cmA)
 {
