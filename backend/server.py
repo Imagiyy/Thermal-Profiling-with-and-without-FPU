@@ -57,7 +57,8 @@ FIELD_NAMES = [
     "P_mW",
     "T_ambient",
     "T_measured",
-    "T_predicted",
+    "T_predicted_3s",
+    "T_predicted_10s",
     "infer_us",
     "fault_code",
 ]
@@ -74,9 +75,11 @@ EXPORT_FIELD_NAMES = [
     "P_mW",
     "T_ambient",
     "T_measured",
-    "T_predicted",
+    "T_predicted_3s",
+    "T_predicted_10s",
     "infer_us",
-    "tracking_error",
+    "tracking_error_3s",
+    "tracking_error_10s",
     "R_theta_JA",
     "fault_code",
     "fault_flags",
@@ -136,20 +139,24 @@ class TelemetryState:
         self.total_frames: int = 0
         self.malformed_frames: int = 0
 
-        # Anti-glitch freeze filter state (freezes display if temp fluctuates >= 10.0 °C for <= 2 samples)
+        # Anti-glitch freeze filter state
         self.clean_t_meas: float | None = None
         self.meas_glitch_cnt: int = 0
-        self.clean_t_pred: float | None = None
-        self.pred_glitch_cnt: int = 0
+        self.clean_t_pred_3s: float | None = None
+        self.pred_3s_glitch_cnt: int = 0
+        self.clean_t_pred_10s: float | None = None
+        self.pred_10s_glitch_cnt: int = 0
 
-        # 3-second lookahead prediction verification buffer (6 samples @ 500 ms)
-        self.pred_buffer: deque[float] = deque(maxlen=7)
+        # Lookahead prediction verification buffers:
+        # 3-second lookahead: 6 samples @ 500 ms
+        # 10-second lookahead: 20 samples @ 500 ms
+        self.pred_3s_buffer: deque[float] = deque(maxlen=7)
+        self.pred_10s_buffer: deque[float] = deque(maxlen=21)
 
-    def filter_temperatures(self, t_meas: float, t_pred: float) -> tuple[float, float]:
+    def filter_temperatures(self, t_meas: float, t_pred_3s: float, t_pred_10s: float) -> tuple[float, float, float]:
         """
         Anti-glitch freezing filter:
-        If temperature fluctuates >= 10.0 °C for <= 2 samples (or drops to <= 0 °C on SPI error),
-        freeze display to the last valid stable temperature.
+        If temperature fluctuates >= 10.0 °C for <= 2 samples, freeze display.
         Only accept change if it persists for >= 3 consecutive samples.
         """
         with self.lock:
@@ -163,7 +170,7 @@ class TelemetryState:
                 if is_meas_glitch:
                     self.meas_glitch_cnt += 1
                     if self.meas_glitch_cnt <= 2:
-                        out_meas = self.clean_t_meas  # Freeze display to last stable reading
+                        out_meas = self.clean_t_meas
                     else:
                         self.clean_t_meas = t_meas
                         self.meas_glitch_cnt = 0
@@ -173,40 +180,58 @@ class TelemetryState:
                     self.meas_glitch_cnt = 0
                     out_meas = t_meas
 
-            # 2. Predicted temperature filter
-            if self.clean_t_pred is None:
-                if t_pred > 0.0:
-                    self.clean_t_pred = t_pred
-                out_pred = t_pred
+            # 2. Predicted 3s temperature filter
+            if self.clean_t_pred_3s is None:
+                if t_pred_3s > 0.0:
+                    self.clean_t_pred_3s = t_pred_3s
+                out_pred_3s = t_pred_3s
             else:
-                # If t_pred is actively closing the gap towards measured heatsink temp, accept immediately
-                if self.clean_t_meas is not None and self.clean_t_pred < self.clean_t_meas and t_pred > self.clean_t_pred and t_pred <= (self.clean_t_meas + 2.0):
-                    self.clean_t_pred = t_pred
-                    self.pred_glitch_cnt = 0
-                    out_pred = t_pred
-                else:
-                    is_pred_glitch = (t_pred <= 0.0) or (abs(t_pred - self.clean_t_pred) >= 10.0)
-                    if is_pred_glitch:
-                        self.pred_glitch_cnt += 1
-                        if self.pred_glitch_cnt <= 2:
-                            out_pred = self.clean_t_pred  # Freeze display to last stable reading
-                        else:
-                            self.clean_t_pred = t_pred
-                            self.pred_glitch_cnt = 0
-                            out_pred = t_pred
+                is_pred_glitch = (t_pred_3s <= 0.0) or (abs(t_pred_3s - self.clean_t_pred_3s) >= 10.0)
+                if is_pred_glitch:
+                    self.pred_3s_glitch_cnt += 1
+                    if self.pred_3s_glitch_cnt <= 2:
+                        out_pred_3s = self.clean_t_pred_3s
                     else:
-                        self.clean_t_pred = t_pred
-                        self.pred_glitch_cnt = 0
-                        out_pred = t_pred
+                        self.clean_t_pred_3s = t_pred_3s
+                        self.pred_3s_glitch_cnt = 0
+                        out_pred_3s = t_pred_3s
+                else:
+                    self.clean_t_pred_3s = t_pred_3s
+                    self.pred_3s_glitch_cnt = 0
+                    out_pred_3s = t_pred_3s
 
-            return round(out_meas, 2), round(out_pred, 2)
+            # 3. Predicted 10s temperature filter
+            if self.clean_t_pred_10s is None:
+                if t_pred_10s > 0.0:
+                    self.clean_t_pred_10s = t_pred_10s
+                out_pred_10s = t_pred_10s
+            else:
+                is_pred10_glitch = (t_pred_10s <= 0.0) or (abs(t_pred_10s - self.clean_t_pred_10s) >= 10.0)
+                if is_pred10_glitch:
+                    self.pred_10s_glitch_cnt += 1
+                    if self.pred_10s_glitch_cnt <= 2:
+                        out_pred_10s = self.clean_t_pred_10s
+                    else:
+                        self.clean_t_pred_10s = t_pred_10s
+                        self.pred_10s_glitch_cnt = 0
+                        out_pred_10s = t_pred_10s
+                else:
+                    self.clean_t_pred_10s = t_pred_10s
+                    self.pred_10s_glitch_cnt = 0
+                    out_pred_10s = t_pred_10s
+
+            return round(out_meas, 2), round(out_pred_3s, 2), round(out_pred_10s, 2)
 
     def reset_filters(self) -> None:
         with self.lock:
             self.clean_t_meas = None
             self.meas_glitch_cnt = 0
-            self.clean_t_pred = None
-            self.pred_glitch_cnt = 0
+            self.clean_t_pred_3s = None
+            self.pred_3s_glitch_cnt = 0
+            self.clean_t_pred_10s = None
+            self.pred_10s_glitch_cnt = 0
+            self.pred_3s_buffer.clear()
+            self.pred_10s_buffer.clear()
 
 
 state = TelemetryState()
@@ -228,11 +253,11 @@ def decode_faults(code: int) -> list[str]:
 def parse_frame(raw_line: str) -> dict | None:
     """
     Parse a single CSV telemetry line into a validated dict.
-    Supports both 10-field (with DWT inference time) and legacy 9-field formats.
+    Supports 11-field (both 3s & 10s predictions), 10-field, and legacy 9-field formats.
     Returns None on malformed input (caller can safely skip).
     """
     parts = [p.strip() for p in raw_line.split(",")]
-    if len(parts) not in (9, 10):
+    if len(parts) not in (9, 10, 11):
         return None
     try:
         ts = int(parts[0])
@@ -242,11 +267,25 @@ def parse_frame(raw_line: str) -> dict | None:
         p_mw = float(parts[4])
         t_amb = float(parts[5])
         t_meas = float(parts[6])
-        t_pred = float(parts[7])
-        if len(parts) == 10:
+        if len(parts) == 11:
+            t_pred_3s = float(parts[7])
+            t_pred_10s = float(parts[8])
+            infer_us = float(parts[9])
+            fault = int(parts[10], 0)
+        elif len(parts) == 10:
+            t_pred_3s = float(parts[7])
+            # Physics-consistent 10s estimation if older 1-prediction frame received
+            if v_in < 8.5:
+                delta = t_meas - t_amb
+                t_pred_10s = t_amb + delta * 0.953 if delta > 0 else t_meas
+            else:
+                d3 = t_pred_3s - t_meas
+                t_pred_10s = t_meas + d3 * 2.85
             infer_us = float(parts[8])
-            fault = int(parts[9], 0)  # supports hex 0x prefix
+            fault = int(parts[9], 0)
         else:
+            t_pred_3s = float(parts[7])
+            t_pred_10s = t_pred_3s
             infer_us = 0.0
             fault = int(parts[8], 0)
     except (ValueError, IndexError):
@@ -260,17 +299,24 @@ def parse_frame(raw_line: str) -> dict | None:
     else:
         v_drop = round(max(0.0, v_in - v_out), 3)
 
-    # Anti-glitch freeze filter: suppress temperature fluctuations >= 10.0 °C lasting <= 2 samples
-    t_meas, t_pred = state.filter_temperatures(t_meas, t_pred)
+    # Anti-glitch freeze filter
+    t_meas, t_pred_3s, t_pred_10s = state.filter_temperatures(t_meas, t_pred_3s, t_pred_10s)
 
-    # 3-second lookahead error (evaluates prediction made 6 samples = 3.0s ago against current measurement)
+    # 3-second and 10-second lookahead errors
     with state.lock:
-        state.pred_buffer.append(t_pred)
-        if len(state.pred_buffer) >= 6:
-            past_pred = state.pred_buffer[0]
-            tracking_error = round(abs(t_meas - past_pred), 3)
+        state.pred_3s_buffer.append(t_pred_3s)
+        if len(state.pred_3s_buffer) >= 6:
+            past_pred_3s = state.pred_3s_buffer[0]
+            tracking_error_3s = round(abs(t_meas - past_pred_3s), 3)
         else:
-            tracking_error = round(abs(t_meas - t_pred), 3)
+            tracking_error_3s = round(abs(t_meas - t_pred_3s), 3)
+
+        state.pred_10s_buffer.append(t_pred_10s)
+        if len(state.pred_10s_buffer) >= 20:
+            past_pred_10s = state.pred_10s_buffer[0]
+            tracking_error_10s = round(abs(t_meas - past_pred_10s), 3)
+        else:
+            tracking_error_10s = round(abs(t_meas - t_pred_10s), 3)
 
     return {
         "timestamp_ms": ts,
@@ -280,12 +326,16 @@ def parse_frame(raw_line: str) -> dict | None:
         "P_mW": round(p_mw, 2),
         "T_ambient": round(t_amb, 2),
         "T_measured": round(t_meas, 2),
-        "T_predicted": round(t_pred, 2),
+        "T_predicted_3s": round(t_pred_3s, 2),
+        "T_predicted_10s": round(t_pred_10s, 2),
+        "T_predicted": round(t_pred_3s, 2),
         "infer_us": round(infer_us, 1),
         "fault_code": fault,
         "faults": decode_faults(fault),
         "V_drop": v_drop,
-        "tracking_error": tracking_error,
+        "tracking_error_3s": tracking_error_3s,
+        "tracking_error_10s": tracking_error_10s,
+        "tracking_error": tracking_error_3s,
         "R_theta_JA": round(
             (t_meas - t_amb) / (p_mw / 1000.0), 3
         ) if p_mw > 0 else None,
@@ -377,9 +427,11 @@ def serial_reader() -> None:
                         frame["P_mW"],
                         frame["T_ambient"],
                         frame["T_measured"],
-                        frame["T_predicted"],
+                        frame["T_predicted_3s"],
+                        frame["T_predicted_10s"],
                         frame["infer_us"],
-                        frame["tracking_error"],
+                        frame["tracking_error_3s"],
+                        frame["tracking_error_10s"],
                         frame["R_theta_JA"] if frame["R_theta_JA"] is not None else "",
                         frame["fault_code"],
                         "|".join(frame["faults"]) if frame["faults"] else "OK",
@@ -403,12 +455,13 @@ def serial_reader() -> None:
 
 def virtual_reader() -> None:
     """
-    Virtual telemetry streamer generating realistic STM32 10-field CSV frames:
-      timestamp_ms, vin, vout, current, power, amb_temp, hs_temp, pred_temp, infer_us, fault_code
+    Virtual telemetry streamer generating realistic STM32 11-field CSV frames:
+      timestamp_ms, vin, vout, current, power, amb_temp, hs_temp, pred_3s, pred_10s, infer_us, fault_code
     Runs every 500 ms (matching firmware SAMPLE_PERIOD_MS) for benchmarking and live demonstration.
     """
+    import math
     import random
-    log.info("Virtual STM32 reader started (10-field stream @ 500 ms).")
+    log.info("Virtual STM32 reader started (11-field dual-prediction stream @ 500 ms).")
     sim_t0 = time.time()
     heat = 34.5
 
@@ -420,17 +473,23 @@ def virtual_reader() -> None:
         i_ma = 245.0 + random.uniform(-3.0, 3.0)
         p_mw = (v_in - v_out) * i_ma
         t_amb = 29.5 + random.uniform(-0.1, 0.1)
-        
+
         # Thermal equilibrium model
         target_heat = t_amb + (p_mw / 1000.0) * 12.8
         heat += (target_heat - heat) * 0.04 + random.uniform(-0.08, 0.08)
         t_meas = heat
-        t_pred = heat + random.uniform(-0.35, 0.35)
+
+        # Physical lookaheads (+3s and +10s forecast)
+        decay_3s = 1.0 - math.exp(-3.0 / 208.0)
+        decay_10s = 1.0 - math.exp(-10.0 / 208.0)
+        t_pred_3s = heat + (target_heat - heat) * decay_3s + random.uniform(-0.15, 0.15)
+        t_pred_10s = heat + (target_heat - heat) * decay_10s + random.uniform(-0.25, 0.25)
+
         # Latency in microseconds benchmarked via Cortex-M4 DWT (~240-265 us)
         infer_us = int(random.gauss(248, 12))
         fault = 0
 
-        line = f"{elapsed_ms},{v_in:.3f},{v_out:.3f},{i_ma:.2f},{p_mw:.2f},{t_amb:.2f},{t_meas:.2f},{t_pred:.2f},{infer_us},{fault}"
+        line = f"{elapsed_ms},{v_in:.3f},{v_out:.3f},{i_ma:.2f},{p_mw:.2f},{t_amb:.2f},{t_meas:.2f},{t_pred_3s:.2f},{t_pred_10s:.2f},{infer_us},{fault}"
         frame = parse_frame(line)
         if frame is not None:
             state.total_frames += 1
@@ -450,9 +509,11 @@ def virtual_reader() -> None:
                             frame["P_mW"],
                             frame["T_ambient"],
                             frame["T_measured"],
-                            frame["T_predicted"],
+                            frame["T_predicted_3s"],
+                            frame["T_predicted_10s"],
                             frame["infer_us"],
-                            frame["tracking_error"],
+                            frame["tracking_error_3s"],
+                            frame["tracking_error_10s"],
                             frame["R_theta_JA"] if frame["R_theta_JA"] is not None else "",
                             frame["fault_code"],
                             "|".join(frame["faults"]) if frame["faults"] else "OK",

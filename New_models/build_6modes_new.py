@@ -1,7 +1,7 @@
 import json
 import numpy as np
 
-# Load scaler and weights for mlp_model_new (4-input stateless model)
+# Load scaler and weights for mlp_model_new (4-input stateless dual-horizon model)
 with open('New_models/scaler_params_new.json') as f:
     scaler = json.load(f)
 with open('New_models/mlp_weights_new.json') as f:
@@ -15,8 +15,13 @@ scale = np.array(scaler['scale'], dtype=np.float32)
 
 W0 = np.array(weights['layers'][0]['weights'], dtype=np.float32)  # (n_inputs, n_hidden)
 b0 = np.array(weights['layers'][0]['biases'],  dtype=np.float32)  # (n_hidden,)
-W1 = np.array(weights['layers'][1]['weights'], dtype=np.float32).flatten()  # (n_hidden,)
-b1 = np.array(weights['layers'][1]['biases'],  dtype=np.float32).flatten()  # (1,)
+W1 = np.array(weights['layers'][1]['weights'], dtype=np.float32)  # (n_hidden, 2)
+b1 = np.array(weights['layers'][1]['biases'],  dtype=np.float32)  # (2,)
+
+W1_3s  = W1[:, 0]
+W1_10s = W1[:, 1]
+b1_3s  = float(b1[0])
+b1_10s = float(b1[1])
 
 S_N32 = 10000
 SHIFT_P32 = 16
@@ -33,33 +38,43 @@ def f_to_u16(val):
 
 W0_f32 = W0.flatten()
 b0_f32 = b0
-W1_f32 = W1
-b1_f32 = b1
+W1_3s_f32 = W1_3s
+W1_10s_f32 = W1_10s
 
 W0_n32 = np.round(W0 * S_N32).astype(int).flatten()
 b0_n32 = np.round(b0 * S_N32).astype(int)
-W1_n32 = np.round(W1 * S_N32).astype(int).flatten()
-b1_n32 = np.round(b1 * S_N32).astype(int)
+W1_3s_n32  = np.round(W1_3s * S_N32).astype(int)
+W1_10s_n32 = np.round(W1_10s * S_N32).astype(int)
+b1_3s_n32  = int(round(b1_3s * S_N32))
+b1_10s_n32 = int(round(b1_10s * S_N32))
 
 W0_p32 = np.round(W0 * S_P32).astype(int).flatten()
 b0_p32 = np.round(b0 * S_P32).astype(int)
-W1_p32 = np.round(W1 * S_P32).astype(int).flatten()
-b1_p32 = np.round(b1 * S_P32).astype(int)
+W1_3s_p32  = np.round(W1_3s * S_P32).astype(int)
+W1_10s_p32 = np.round(W1_10s * S_P32).astype(int)
+b1_3s_p32  = int(round(b1_3s * S_P32))
+b1_10s_p32 = int(round(b1_10s * S_P32))
 
 W0_f16 = [f_to_u16(x) for x in W0.flatten()]
 b0_f16 = [f_to_u16(x) for x in b0]
-W1_f16 = [f_to_u16(x) for x in W1]
-b1_f16 = [f_to_u16(x) for x in b1]
+W1_3s_f16  = [f_to_u16(x) for x in W1_3s]
+W1_10s_f16 = [f_to_u16(x) for x in W1_10s]
+b1_3s_f16  = f_to_u16(b1_3s)
+b1_10s_f16 = f_to_u16(b1_10s)
 
 W0_n16 = np.round(W0 * S_N16).astype(np.int16).flatten()
 b0_n16 = np.round(b0 * S_N16).astype(int)
-W1_n16 = np.round(W1 * S_N16).astype(np.int16).flatten()
-b1_n16 = np.round(b1 * S_N16).astype(int)
+W1_3s_n16  = np.round(W1_3s * S_N16).astype(np.int16)
+W1_10s_n16 = np.round(W1_10s * S_N16).astype(np.int16)
+b1_3s_n16  = int(round(b1_3s * S_N16))
+b1_10s_n16 = int(round(b1_10s * S_N16))
 
 W0_p16 = np.round(W0 * S_P16).astype(np.int16)
 b0_p16 = np.round(b0 * S_P16).astype(int)
-W1_p16 = np.round(W1 * S_P16).astype(np.int16).flatten()
-b1_p16 = np.round(b1 * S_P16).astype(int)
+W1_3s_p16  = np.round(W1_3s * S_P16).astype(np.int16)
+W1_10s_p16 = np.round(W1_10s * S_P16).astype(np.int16)
+b1_3s_p16  = int(round(b1_3s * S_P16))
+b1_10s_p16 = int(round(b1_10s * S_P16))
 
 W0_simd_01 = []
 W0_simd_23 = []
@@ -71,11 +86,16 @@ for j in range(n_hidden):
     W0_simd_01.append((w1 << 16) | w0)
     W0_simd_23.append((w3 << 16) | w2)
 
-W1_simd = []
+W1_simd_3s = []
+W1_simd_10s = []
 for k in range(0, n_hidden, 2):
-    w0 = int(W1_p16[k])   & 0xFFFF
-    w1 = int(W1_p16[k+1]) & 0xFFFF
-    W1_simd.append((w1 << 16) | w0)
+    w0_3s = int(W1_3s_p16[k])   & 0xFFFF
+    w1_3s = int(W1_3s_p16[k+1]) & 0xFFFF
+    W1_simd_3s.append((w1_3s << 16) | w0_3s)
+
+    w0_10s = int(W1_10s_p16[k])   & 0xFFFF
+    w1_10s = int(W1_10s_p16[k+1]) & 0xFFFF
+    W1_simd_10s.append((w1_10s << 16) | w0_10s)
 
 def fmt_arr(arr, per_line=8):
     lines = []
@@ -109,14 +129,14 @@ NI = n_inputs
 NH = n_hidden
 
 header_code = f"""/*
- * mlp_model_new.h -- Auto-generated TinyML 6-Mode Stateless Thermal Predictor
+ * mlp_model_new.h -- Auto-generated TinyML 6-Mode Stateless Dual Thermal Predictor
  * Target: STM32 Nucleo-64 F401RE (Cortex-M4, 16 MHz HSI)
  *
- * Architecture: {NI} inputs -> {NH} neurons (ReLU) -> 1 output (Linear)
+ * Architecture: {NI} inputs -> {NH} neurons (ReLU) -> 2 outputs (Linear: 3s & 10s)
  * Features: [heatsink_temp_C, ambient_temp_C, power_loss_mW, current_mA]
+ * Targets:  [+3s lookahead, +10s lookahead]
  *
- * All 6 modes are compiled into firmware simultaneously. You can call
- * specific mode functions directly or use mlp_new_predict_temp_cC().
+ * All 6 modes are compiled into firmware simultaneously.
  */
 
 #ifndef MLP_MODEL_NEW_H
@@ -135,15 +155,21 @@ header_code = f"""/*
 #define BENCHMARK_MODE            MODE_16BIT_FIXED_POT_SIMD
 #endif
 
-/* Individual mode inference entrypoints */
-int32_t mlp_new_predict_mode0_fp32(int32_t hs_cC, int32_t amb_cC, int32_t ploss_cmW, int32_t i_cmA);
-int32_t mlp_new_predict_mode1_int32_norm(int32_t hs_cC, int32_t amb_cC, int32_t ploss_cmW, int32_t i_cmA);
-int32_t mlp_new_predict_mode2_int32_pot(int32_t hs_cC, int32_t amb_cC, int32_t ploss_cmW, int32_t i_cmA);
-int32_t mlp_new_predict_mode3_fp16(int32_t hs_cC, int32_t amb_cC, int32_t ploss_cmW, int32_t i_cmA);
-int32_t mlp_new_predict_mode4_int16_norm(int32_t hs_cC, int32_t amb_cC, int32_t ploss_cmW, int32_t i_cmA);
-int32_t mlp_new_predict_mode5_int16_simd(int32_t hs_cC, int32_t amb_cC, int32_t ploss_cmW, int32_t i_cmA);
+typedef struct {{
+    int32_t pred_3s_cC;
+    int32_t pred_10s_cC;
+}} mlp_prediction_t;
 
-/* Master dispatcher entrypoint (dispatches based on BENCHMARK_MODE) */
+/* Individual mode dual-inference entrypoints */
+mlp_prediction_t mlp_new_predict_mode0_fp32(int32_t hs_cC, int32_t amb_cC, int32_t ploss_cmW, int32_t i_cmA);
+mlp_prediction_t mlp_new_predict_mode1_int32_norm(int32_t hs_cC, int32_t amb_cC, int32_t ploss_cmW, int32_t i_cmA);
+mlp_prediction_t mlp_new_predict_mode2_int32_pot(int32_t hs_cC, int32_t amb_cC, int32_t ploss_cmW, int32_t i_cmA);
+mlp_prediction_t mlp_new_predict_mode3_fp16(int32_t hs_cC, int32_t amb_cC, int32_t ploss_cmW, int32_t i_cmA);
+mlp_prediction_t mlp_new_predict_mode4_int16_norm(int32_t hs_cC, int32_t amb_cC, int32_t ploss_cmW, int32_t i_cmA);
+mlp_prediction_t mlp_new_predict_mode5_int16_simd(int32_t hs_cC, int32_t amb_cC, int32_t ploss_cmW, int32_t i_cmA);
+
+/* Master dispatcher entrypoints */
+mlp_prediction_t mlp_new_predict_dual_cC(int32_t hs_cC, int32_t amb_cC, int32_t ploss_cmW, int32_t i_cmA);
 int32_t mlp_new_predict_temp_cC(int32_t hs_cC, int32_t amb_cC, int32_t ploss_cmW, int32_t i_cmA);
 
 #endif /* MLP_MODEL_NEW_H */
@@ -176,11 +202,25 @@ def gen_x_int():
         f"    raw_c[3] = i_cmA;"
     )
 
+def gen_bound_check():
+    return (
+        "    mlp_prediction_t res;\n"
+        "    res.pred_3s_cC  = hs_cC + delta_3s_cC;\n"
+        "    res.pred_10s_cC = hs_cC + delta_10s_cC;\n"
+        "    if (ploss_cmW > 0) {\n"
+        "        if (res.pred_3s_cC < hs_cC)  res.pred_3s_cC = hs_cC;\n"
+        "        if (res.pred_10s_cC < hs_cC) res.pred_10s_cC = hs_cC;\n"
+        "    }\n"
+        "    if (res.pred_3s_cC > 12500)  res.pred_3s_cC = 12500;\n"
+        "    if (res.pred_10s_cC > 12500) res.pred_10s_cC = 12500;\n"
+        "    return res;"
+    )
+
 c_code = f"""/*
- * mlp_model_new.c -- 6-Mode TinyML Stateless Thermal Predictor for STM32F401RET6
- * Architecture: {NI} Inputs -> {NH} Neurons (ReLU) -> 1 Output (Linear)
+ * mlp_model_new.c -- 6-Mode TinyML Stateless Dual Thermal Predictor for STM32F401RET6
+ * Architecture: {NI} Inputs -> {NH} Neurons (ReLU) -> 2 Outputs (Linear: 3s & 10s)
  * Features: [heatsink_temp_C, ambient_temp_C, power_loss_mW, current_mA]
- * Target: Future Heatsink Temperature +3s ahead (centi-degC)
+ * Targets:  [Future +3s ahead, Future +10s ahead] in centi-degC
  *
  * ALL 6 MODES ARE SIMULTANEOUSLY COMPILED INTO THIS FILE.
  */
@@ -247,15 +287,18 @@ static const float W0[{NI * NH}] = {{
 static const float b0[{NH}] = {{
 {fmt_arr_f(b0_f32)}
 }};
-static const float W1[{NH}] = {{
-{fmt_arr_f(W1_f32)}
+static const float W1_3s[{NH}] = {{
+{fmt_arr_f(W1_3s_f32)}
 }};
-static const float b1[1] = {{
-    {b1_f32[0]:.8f}f
+static const float W1_10s[{NH}] = {{
+{fmt_arr_f(W1_10s_f32)}
+}};
+static const float b1_f32[2] = {{
+    {b1_3s:.8f}f, {b1_10s:.8f}f
 }};
 
-int32_t mlp_new_predict_mode0_fp32(int32_t hs_cC, int32_t amb_cC,
-                                   int32_t ploss_cmW, int32_t i_cmA)
+mlp_prediction_t mlp_new_predict_mode0_fp32(int32_t hs_cC, int32_t amb_cC,
+                                           int32_t ploss_cmW, int32_t i_cmA)
 {{
 {amb_clamp}
 
@@ -270,15 +313,19 @@ int32_t mlp_new_predict_mode0_fp32(int32_t hs_cC, int32_t amb_cC,
         h[j] = (acc > 0.0f) ? acc : 0.0f;
     }}
 
-    float out = b1[0];
+    float out_3s = b1_f32[0];
+    float out_10s = b1_f32[1];
     for (int k = 0; k < {NH}; k++) {{
         if (h[k] > 0.0f) {{
-            out += h[k] * W1[k];
+            out_3s  += h[k] * W1_3s[k];
+            out_10s += h[k] * W1_10s[k];
         }}
     }}
 
-    int32_t delta_cC = (int32_t)(out * 100.0f + (out >= 0.0f ? 0.5f : -0.5f));
-    return hs_cC + delta_cC;
+    int32_t delta_3s_cC  = (int32_t)(out_3s * 100.0f + (out_3s >= 0.0f ? 0.5f : -0.5f));
+    int32_t delta_10s_cC = (int32_t)(out_10s * 100.0f + (out_10s >= 0.0f ? 0.5f : -0.5f));
+
+{gen_bound_check()}
 }}
 
 /* ==============================================================================
@@ -295,13 +342,16 @@ static const int32_t W0_n32[{NI * NH}] = {{
 static const int32_t b0_n32[{NH}] = {{
 {fmt_arr(b0_n32)}
 }};
-static const int32_t W1_n32[{NH}] = {{
-{fmt_arr(W1_n32)}
+static const int32_t W1_3s_n32[{NH}] = {{
+{fmt_arr(W1_3s_n32)}
 }};
-static const int32_t b1_n32[1] = {{ {b1_n32[0]} }};
+static const int32_t W1_10s_n32[{NH}] = {{
+{fmt_arr(W1_10s_n32)}
+}};
+static const int32_t b1_n32[2] = {{ {b1_3s_n32}, {b1_10s_n32} }};
 
-int32_t mlp_new_predict_mode1_int32_norm(int32_t hs_cC, int32_t amb_cC,
-                                        int32_t ploss_cmW, int32_t i_cmA)
+mlp_prediction_t mlp_new_predict_mode1_int32_norm(int32_t hs_cC, int32_t amb_cC,
+                                                int32_t ploss_cmW, int32_t i_cmA)
 {{
 {amb_clamp}
 
@@ -322,16 +372,21 @@ int32_t mlp_new_predict_mode1_int32_norm(int32_t hs_cC, int32_t amb_cC,
         h_q[j] = (acc > 0) ? (int32_t)acc : 0;
     }}
 
-    int64_t out_acc = (int64_t)b1_n32[0] * SCALE_NORMAL_32;
+    int64_t out_acc_3s  = (int64_t)b1_n32[0] * SCALE_NORMAL_32;
+    int64_t out_acc_10s = (int64_t)b1_n32[1] * SCALE_NORMAL_32;
     for (int k = 0; k < {NH}; k++) {{
         if (h_q[k] != 0) {{
-            out_acc += (int64_t)h_q[k] * (int64_t)W1_n32[k];
+            out_acc_3s  += (int64_t)h_q[k] * (int64_t)W1_3s_n32[k];
+            out_acc_10s += (int64_t)h_q[k] * (int64_t)W1_10s_n32[k];
         }}
     }}
-    out_acc /= SCALE_NORMAL_32;
+    out_acc_3s  /= SCALE_NORMAL_32;
+    out_acc_10s /= SCALE_NORMAL_32;
 
-    int32_t delta_cC = (int32_t)(((int64_t)out_acc * 100LL) / SCALE_NORMAL_32);
-    return hs_cC + delta_cC;
+    int32_t delta_3s_cC  = (int32_t)(((int64_t)out_acc_3s * 100LL) / SCALE_NORMAL_32);
+    int32_t delta_10s_cC = (int32_t)(((int64_t)out_acc_10s * 100LL) / SCALE_NORMAL_32);
+
+{gen_bound_check()}
 }}
 
 /* ==============================================================================
@@ -348,13 +403,16 @@ static const int32_t W0_p32[{NI * NH}] = {{
 static const int32_t b0_p32[{NH}] = {{
 {fmt_arr(b0_p32)}
 }};
-static const int32_t W1_p32[{NH}] = {{
-{fmt_arr(W1_p32)}
+static const int32_t W1_3s_p32[{NH}] = {{
+{fmt_arr(W1_3s_p32)}
 }};
-static const int32_t b1_p32[1] = {{ {b1_p32[0]} }};
+static const int32_t W1_10s_p32[{NH}] = {{
+{fmt_arr(W1_10s_p32)}
+}};
+static const int32_t b1_p32[2] = {{ {b1_3s_p32}, {b1_10s_p32} }};
 
-int32_t mlp_new_predict_mode2_int32_pot(int32_t hs_cC, int32_t amb_cC,
-                                       int32_t ploss_cmW, int32_t i_cmA)
+mlp_prediction_t mlp_new_predict_mode2_int32_pot(int32_t hs_cC, int32_t amb_cC,
+                                               int32_t ploss_cmW, int32_t i_cmA)
 {{
 {amb_clamp}
 
@@ -375,16 +433,21 @@ int32_t mlp_new_predict_mode2_int32_pot(int32_t hs_cC, int32_t amb_cC,
         h_q[j] = (acc > 0) ? (int32_t)acc : 0;
     }}
 
-    int64_t out_acc = ((int64_t)b1_p32[0] << SHIFT_POT_32);
+    int64_t out_acc_3s  = ((int64_t)b1_p32[0] << SHIFT_POT_32);
+    int64_t out_acc_10s = ((int64_t)b1_p32[1] << SHIFT_POT_32);
     for (int k = 0; k < {NH}; k++) {{
         if (h_q[k] != 0) {{
-            out_acc += (int64_t)h_q[k] * (int64_t)W1_p32[k];
+            out_acc_3s  += (int64_t)h_q[k] * (int64_t)W1_3s_p32[k];
+            out_acc_10s += (int64_t)h_q[k] * (int64_t)W1_10s_p32[k];
         }}
     }}
-    out_acc >>= SHIFT_POT_32;
+    out_acc_3s  >>= SHIFT_POT_32;
+    out_acc_10s >>= SHIFT_POT_32;
 
-    int32_t delta_cC = (int32_t)(((int64_t)out_acc * 100LL) >> SHIFT_POT_32);
-    return hs_cC + delta_cC;
+    int32_t delta_3s_cC  = (int32_t)(((int64_t)out_acc_3s * 100LL) >> SHIFT_POT_32);
+    int32_t delta_10s_cC = (int32_t)(((int64_t)out_acc_10s * 100LL) >> SHIFT_POT_32);
+
+{gen_bound_check()}
 }}
 
 /* ==============================================================================
@@ -396,15 +459,18 @@ static const uint16_t W0_f16[{NI * NH}] = {{
 static const uint16_t b0_f16[{NH}] = {{
 {fmt_arr_u16(b0_f16)}
 }};
-static const uint16_t W1_f16[{NH}] = {{
-{fmt_arr_u16(W1_f16)}
+static const uint16_t W1_3s_f16[{NH}] = {{
+{fmt_arr_u16(W1_3s_f16)}
 }};
-static const uint16_t b1_f16[1] = {{
-    0x{b1_f16[0]:04X}U
+static const uint16_t W1_10s_f16[{NH}] = {{
+{fmt_arr_u16(W1_10s_f16)}
+}};
+static const uint16_t b1_f16[2] = {{
+    0x{b1_3s_f16:04X}U, 0x{b1_10s_f16:04X}U
 }};
 
-int32_t mlp_new_predict_mode3_fp16(int32_t hs_cC, int32_t amb_cC,
-                                  int32_t ploss_cmW, int32_t i_cmA)
+mlp_prediction_t mlp_new_predict_mode3_fp16(int32_t hs_cC, int32_t amb_cC,
+                                          int32_t ploss_cmW, int32_t i_cmA)
 {{
 {amb_clamp}
 
@@ -419,15 +485,19 @@ int32_t mlp_new_predict_mode3_fp16(int32_t hs_cC, int32_t amb_cC,
         h[j] = (acc > 0.0f) ? acc : 0.0f;
     }}
 
-    float out = fp16_to_fp32(b1_f16[0]);
+    float out_3s  = fp16_to_fp32(b1_f16[0]);
+    float out_10s = fp16_to_fp32(b1_f16[1]);
     for (int k = 0; k < {NH}; k++) {{
         if (h[k] > 0.0f) {{
-            out += h[k] * fp16_to_fp32(W1_f16[k]);
+            out_3s  += h[k] * fp16_to_fp32(W1_3s_f16[k]);
+            out_10s += h[k] * fp16_to_fp32(W1_10s_f16[k]);
         }}
     }}
 
-    int32_t delta_cC = (int32_t)(out * 100.0f + (out >= 0.0f ? 0.5f : -0.5f));
-    return hs_cC + delta_cC;
+    int32_t delta_3s_cC  = (int32_t)(out_3s * 100.0f + (out_3s >= 0.0f ? 0.5f : -0.5f));
+    int32_t delta_10s_cC = (int32_t)(out_10s * 100.0f + (out_10s >= 0.0f ? 0.5f : -0.5f));
+
+{gen_bound_check()}
 }}
 
 /* ==============================================================================
@@ -441,13 +511,16 @@ static const int16_t W0_n16[{NI * NH}] = {{
 static const int32_t b0_n16[{NH}] = {{
 {fmt_arr(b0_n16)}
 }};
-static const int16_t W1_n16[{NH}] = {{
-{fmt_arr(W1_n16)}
+static const int16_t W1_3s_n16[{NH}] = {{
+{fmt_arr(W1_3s_n16)}
 }};
-static const int32_t b1_n16[1] = {{ {b1_n16[0]} }};
+static const int16_t W1_10s_n16[{NH}] = {{
+{fmt_arr(W1_10s_n16)}
+}};
+static const int32_t b1_n16[2] = {{ {b1_3s_n16}, {b1_10s_n16} }};
 
-int32_t mlp_new_predict_mode4_int16_norm(int32_t hs_cC, int32_t amb_cC,
-                                        int32_t ploss_cmW, int32_t i_cmA)
+mlp_prediction_t mlp_new_predict_mode4_int16_norm(int32_t hs_cC, int32_t amb_cC,
+                                                int32_t ploss_cmW, int32_t i_cmA)
 {{
 {amb_clamp}
 
@@ -468,16 +541,21 @@ int32_t mlp_new_predict_mode4_int16_norm(int32_t hs_cC, int32_t amb_cC,
         h_q[j] = (acc > 0) ? (int16_t)acc : 0;
     }}
 
-    int32_t out_acc = b1_n16[0] * SCALE_NORMAL_16;
+    int32_t out_acc_3s  = b1_n16[0] * SCALE_NORMAL_16;
+    int32_t out_acc_10s = b1_n16[1] * SCALE_NORMAL_16;
     for (int k = 0; k < {NH}; k++) {{
         if (h_q[k] != 0) {{
-            out_acc += (int32_t)h_q[k] * (int32_t)W1_n16[k];
+            out_acc_3s  += (int32_t)h_q[k] * (int32_t)W1_3s_n16[k];
+            out_acc_10s += (int32_t)h_q[k] * (int32_t)W1_10s_n16[k];
         }}
     }}
-    out_acc /= SCALE_NORMAL_16;
+    out_acc_3s  /= SCALE_NORMAL_16;
+    out_acc_10s /= SCALE_NORMAL_16;
 
-    int32_t delta_cC = (int32_t)(((int64_t)out_acc * 100LL) / SCALE_NORMAL_16);
-    return hs_cC + delta_cC;
+    int32_t delta_3s_cC  = (int32_t)(((int64_t)out_acc_3s * 100LL) / SCALE_NORMAL_16);
+    int32_t delta_10s_cC = (int32_t)(((int64_t)out_acc_10s * 100LL) / SCALE_NORMAL_16);
+
+{gen_bound_check()}
 }}
 
 /* ==============================================================================
@@ -485,11 +563,9 @@ int32_t mlp_new_predict_mode4_int16_norm(int32_t hs_cC, int32_t amb_cC,
  * ============================================================================== */
 #define SHIFT_POT_16 11
 
-/* Packed 16-bit weight pairs for SMLAD: input pair [0,1] */
 static const uint32_t W0_simd_01[{NH}] = {{
 {fmt_arr_hex(W0_simd_01)}
 }};
-/* Packed 16-bit weight pairs for SMLAD: input pair [2,3] */
 static const uint32_t W0_simd_23[{NH}] = {{
 {fmt_arr_hex(W0_simd_23)}
 }};
@@ -497,13 +573,16 @@ static const int32_t b0_simd[{NH}] = {{
 {fmt_arr(b0_p16)}
 }};
 
-static const uint32_t W1_simd[{NH // 2}] = {{
-{fmt_arr_hex(W1_simd)}
+static const uint32_t W1_simd_3s[{NH // 2}] = {{
+{fmt_arr_hex(W1_simd_3s)}
 }};
-static const int32_t b1_simd[1] = {{ {b1_p16[0]} }};
+static const uint32_t W1_simd_10s[{NH // 2}] = {{
+{fmt_arr_hex(W1_simd_10s)}
+}};
+static const int32_t b1_simd[2] = {{ {b1_3s_p16}, {b1_10s_p16} }};
 
-int32_t mlp_new_predict_mode5_int16_simd(int32_t hs_cC, int32_t amb_cC,
-                                        int32_t ploss_cmW, int32_t i_cmA)
+mlp_prediction_t mlp_new_predict_mode5_int16_simd(int32_t hs_cC, int32_t amb_cC,
+                                                int32_t ploss_cmW, int32_t i_cmA)
 {{
 {amb_clamp}
 
@@ -528,23 +607,28 @@ int32_t mlp_new_predict_mode5_int16_simd(int32_t hs_cC, int32_t amb_cC,
         h_q[j] = (acc > 0) ? (int16_t)acc : 0;
     }}
 
-    /* Layer 1: {NH} -> 1 (SMLAD across {NH // 2} pairs, ReLU zero-skipped) */
-    int32_t out_acc = b1_simd[0] << SHIFT_POT_16;
+    /* Layer 1: {NH} -> 2 (Dual SMLAD across {NH // 2} pairs) */
+    int32_t out_acc_3s  = b1_simd[0] << SHIFT_POT_16;
+    int32_t out_acc_10s = b1_simd[1] << SHIFT_POT_16;
     for (int p = 0; p < {NH // 2}; p++) {{
         uint32_t h_pair = ((uint32_t)(uint16_t)h_q[p*2+1] << 16) | ((uint32_t)(uint16_t)h_q[p*2]);
-        out_acc = smlad_dual(h_pair, W1_simd[p], out_acc);
+        out_acc_3s  = smlad_dual(h_pair, W1_simd_3s[p],  out_acc_3s);
+        out_acc_10s = smlad_dual(h_pair, W1_simd_10s[p], out_acc_10s);
     }}
-    out_acc >>= SHIFT_POT_16;
+    out_acc_3s  >>= SHIFT_POT_16;
+    out_acc_10s >>= SHIFT_POT_16;
 
-    int32_t delta_cC = (int32_t)(((int64_t)out_acc * 100LL) >> SHIFT_POT_16);
-    return hs_cC + delta_cC;
+    int32_t delta_3s_cC  = (int32_t)(((int64_t)out_acc_3s * 100LL) >> SHIFT_POT_16);
+    int32_t delta_10s_cC = (int32_t)(((int64_t)out_acc_10s * 100LL) >> SHIFT_POT_16);
+
+{gen_bound_check()}
 }}
 
 /* ==============================================================================
- * MASTER ENTRYPOINT DISPATCHER
+ * MASTER ENTRYPOINT DISPATCHERS
  * ============================================================================== */
-int32_t mlp_new_predict_temp_cC(int32_t hs_cC, int32_t amb_cC,
-                                 int32_t ploss_cmW, int32_t i_cmA)
+mlp_prediction_t mlp_new_predict_dual_cC(int32_t hs_cC, int32_t amb_cC,
+                                         int32_t ploss_cmW, int32_t i_cmA)
 {{
 #if (BENCHMARK_MODE == MODE_32BIT_FPU)
     return mlp_new_predict_mode0_fp32(hs_cC, amb_cC, ploss_cmW, i_cmA);
@@ -562,9 +646,16 @@ int32_t mlp_new_predict_temp_cC(int32_t hs_cC, int32_t amb_cC,
     return mlp_new_predict_mode5_int16_simd(hs_cC, amb_cC, ploss_cmW, i_cmA);
 #endif
 }}
+
+int32_t mlp_new_predict_temp_cC(int32_t hs_cC, int32_t amb_cC,
+                                 int32_t ploss_cmW, int32_t i_cmA)
+{{
+    mlp_prediction_t res = mlp_new_predict_dual_cC(hs_cC, amb_cC, ploss_cmW, i_cmA);
+    return res.pred_3s_cC;
+}}
 """
 
 with open('New_models/mlp_model_new.c', 'w', encoding='utf-8') as f:
     f.write(c_code)
 
-print("SUCCESS: Generated New_models/mlp_model_new.h and mlp_model_new.c with ALL 6 MODES simultaneously compiled!")
+print("SUCCESS: Generated New_models/mlp_model_new.h and mlp_model_new.c with ALL 6 MODES (Dual 3s & 10s Horizons)!")

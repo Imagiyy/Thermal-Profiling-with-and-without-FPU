@@ -63,9 +63,11 @@ static volatile uint8_t active_model = ACTIVE_MODEL;
 #define SPI_TIMEOUT_MS     5U
 #define ADC_TIMEOUT_MS     5U
 
-/* Newton's Law of Cooling: Q15 decay factor for dt = 3.0 s, Tau = 208 s
- * ALPHA_COOL_Q15 = round(exp(-3.0 / 208.0) * 32768) = 32300 */
-#define ALPHA_COOL_Q15     32300
+/* Newton's Law of Cooling: Q15 decay factors for Tau = 208 s
+ * ALPHA_COOL_3S_Q15  = round(exp(-3.0 / 208.0) * 32768) = 32300
+ * ALPHA_COOL_10S_Q15 = round(exp(-10.0 / 208.0) * 32768) = 31229 */
+#define ALPHA_COOL_3S_Q15  32300
+#define ALPHA_COOL_10S_Q15 31229
 
 /* ======================== MOSFET POWER CUTOFF ============================= */
 /* STM32 Nucleo-64 Pin: PA8 (Arduino Digital Header D7, CN9 Pin 1)
@@ -686,7 +688,7 @@ int main(void)
         uint32_t ts = millis();
         uint8_t  fault = 0U;
         int32_t  vin_mV = 0, vout_mV = 0, i_cmA = 0, amb_cC = 0, hs_cC = 0;
-        int32_t  pred_cC = 0, ploss_cmW = 0;
+        int32_t  pred_3s_cC = 0, pred_10s_cC = 0, ploss_cmW = 0;
         uint32_t infer_us = 0;
 
         /* INA219: 12 V input rail */
@@ -768,21 +770,21 @@ int main(void)
          * (KA7808 requires Vin >= 9.5 V to regulate 8.0 V; avoids 30s cap discharge noise)
          *
          * Both phases use closed-loop 1-step lookahead anchored to live
-         * filtered sensor readings (hs_cC, amb_cC) — no open-loop state. */
+         * filtered sensor readings (hs_cC, amb_cC) — no open-loop state.
+         */
         if (vin_mV < 8500) {
             i_cmA = 0;
             ploss_cmW = 0;
             mlp_reset_timebase();
 
-            /* Newton's Law of Passive Cooling: 3-second lookahead (t + 3.0s)
-             * Tau = 208 s (measured from heatsink dataset), dt = 3.0 s
-             * ALPHA_COOL_Q15 = round(exp(-3.0 / 208.0) * 32768) = 32300
-             * Anchored to live hs_cC each iteration (closed-loop). */
+            /* Newton's Law of Passive Cooling: Dual 3s and 10s lookahead */
             int32_t delta = hs_cC - amb_cC;
             if (delta > 0) {
-                pred_cC = amb_cC + (int32_t)(((int64_t)delta * ALPHA_COOL_Q15) >> 15);
+                pred_3s_cC  = amb_cC + (int32_t)(((int64_t)delta * ALPHA_COOL_3S_Q15) >> 15);
+                pred_10s_cC = amb_cC + (int32_t)(((int64_t)delta * ALPHA_COOL_10S_Q15) >> 15);
             } else {
-                pred_cC = hs_cC;
+                pred_3s_cC  = hs_cC;
+                pred_10s_cC = hs_cC;
             }
             infer_us = 1U;
         } else {
@@ -798,83 +800,82 @@ int main(void)
             /* Benchmark TinyML inference latency via DWT */
             uint32_t t_start = DWT->CYCCNT;
             if (active_model == MODEL_MLP_NEW) {
-                /* 4-input stateless model: directly calls active benchmark mode */
 #if (BENCHMARK_MODE == 0)
-                pred_cC = mlp_new_predict_mode0_fp32(hs_cC, amb_cC, ploss_cmW, i_cmA);
+                mlp_prediction_t pred = mlp_new_predict_mode0_fp32(hs_cC, amb_cC, ploss_cmW, i_cmA);
 #elif (BENCHMARK_MODE == 1)
-                pred_cC = mlp_new_predict_mode1_int32_norm(hs_cC, amb_cC, ploss_cmW, i_cmA);
+                mlp_prediction_t pred = mlp_new_predict_mode1_int32_norm(hs_cC, amb_cC, ploss_cmW, i_cmA);
 #elif (BENCHMARK_MODE == 2)
-                pred_cC = mlp_new_predict_mode2_int32_pot(hs_cC, amb_cC, ploss_cmW, i_cmA);
+                mlp_prediction_t pred = mlp_new_predict_mode2_int32_pot(hs_cC, amb_cC, ploss_cmW, i_cmA);
 #elif (BENCHMARK_MODE == 3)
-                pred_cC = mlp_new_predict_mode3_fp16(hs_cC, amb_cC, ploss_cmW, i_cmA);
+                mlp_prediction_t pred = mlp_new_predict_mode3_fp16(hs_cC, amb_cC, ploss_cmW, i_cmA);
 #elif (BENCHMARK_MODE == 4)
-                pred_cC = mlp_new_predict_mode4_int16_norm(hs_cC, amb_cC, ploss_cmW, i_cmA);
+                mlp_prediction_t pred = mlp_new_predict_mode4_int16_norm(hs_cC, amb_cC, ploss_cmW, i_cmA);
 #elif (BENCHMARK_MODE == 5)
-                pred_cC = mlp_new_predict_mode5_int16_simd(hs_cC, amb_cC, ploss_cmW, i_cmA);
+                mlp_prediction_t pred = mlp_new_predict_mode5_int16_simd(hs_cC, amb_cC, ploss_cmW, i_cmA);
 #else
-                pred_cC = mlp_new_predict_temp_cC(hs_cC, amb_cC, ploss_cmW, i_cmA);
+                mlp_prediction_t pred = mlp_new_predict_dual_cC(hs_cC, amb_cC, ploss_cmW, i_cmA);
 #endif
+                pred_3s_cC  = pred.pred_3s_cC;
+                pred_10s_cC = pred.pred_10s_cC;
             } else {
-                pred_cC = cnn_predict_temp_cC(ploss_cmW, i_cmA, amb_cC, hs_cC);
+                pred_3s_cC  = cnn_predict_temp_cC(ploss_cmW, i_cmA, amb_cC, hs_cC);
+                pred_10s_cC = pred_3s_cC;
             }
             uint32_t infer_cycles = DWT->CYCCNT - t_start;
             infer_us = infer_cycles / 16U; /* 16 MHz HSI: 16 cycles = 1 us */
 
-            /* Physical Boundary Invariants (closed-loop, anchored to live hs_cC):
-             * Under positive power dissipation, the junction/regulator cannot be
-             * colder than the heatsink -> clamp lower bound to hs_cC.
-             * Absolute ceiling: 125.0 °C (12500 cC). */
-            if (ploss_cmW > 0 && pred_cC < hs_cC) {
-                pred_cC = hs_cC;
+            /* Physical Boundary Invariants */
+            if (ploss_cmW > 0) {
+                if (pred_3s_cC < hs_cC)  pred_3s_cC = hs_cC;
+                if (pred_10s_cC < hs_cC) pred_10s_cC = hs_cC;
             }
-            if (pred_cC > 12500) {
-                pred_cC = 12500;
-            }
+            if (pred_3s_cC > 12500)  pred_3s_cC = 12500;
+            if (pred_10s_cC > 12500) pred_10s_cC = 12500;
         }
 
-        /* Anti-glitch freeze filter for predicted temperature:
-         * Suppress transient prediction fluctuations >= 10.0 °C (1000 cC) lasting <= 2 samples */
-        static int32_t s_clean_pred_cC = 0;
-        static uint8_t s_pred_glitch_cnt = 0;
-
-        if (s_clean_pred_cC == 0) {
-            if (pred_cC > 0) {
-                s_clean_pred_cC = pred_cC;
-            }
+        /* Anti-glitch freeze filter for 3s predicted temperature */
+        static int32_t s_clean_pred_3s_cC = 0;
+        static uint8_t s_pred_3s_glitch_cnt = 0;
+        if (s_clean_pred_3s_cC == 0) {
+            if (pred_3s_cC > 0) s_clean_pred_3s_cC = pred_3s_cC;
         } else {
-            int32_t diff_pred = pred_cC - s_clean_pred_cC;
-            if (diff_pred < 0) diff_pred = -diff_pred;
-
-            if (diff_pred >= 1000) {
-                s_pred_glitch_cnt++;
-                if (s_pred_glitch_cnt <= 2) {
-                    pred_cC = s_clean_pred_cC; /* Freeze display to last stable reading */
-                } else {
-                    /* Persisted for > 2 samples: accept legitimate step change */
-                    s_clean_pred_cC = pred_cC;
-                    s_pred_glitch_cnt = 0;
-                }
-            } else {
-                s_clean_pred_cC = pred_cC;
-                s_pred_glitch_cnt = 0;
-            }
+            int32_t diff = pred_3s_cC - s_clean_pred_3s_cC;
+            if (diff < 0) diff = -diff;
+            if (diff >= 1000) {
+                s_pred_3s_glitch_cnt++;
+                if (s_pred_3s_glitch_cnt <= 2) pred_3s_cC = s_clean_pred_3s_cC;
+                else { s_clean_pred_3s_cC = pred_3s_cC; s_pred_3s_glitch_cnt = 0; }
+            } else { s_clean_pred_3s_cC = pred_3s_cC; s_pred_3s_glitch_cnt = 0; }
         }
 
-        /* pred_cC is now purely derived from live sensor state each iteration
-         * (closed-loop) — no persistent autoregressive state needed. */
+        /* Anti-glitch freeze filter for 10s predicted temperature */
+        static int32_t s_clean_pred_10s_cC = 0;
+        static uint8_t s_pred_10s_glitch_cnt = 0;
+        if (s_clean_pred_10s_cC == 0) {
+            if (pred_10s_cC > 0) s_clean_pred_10s_cC = pred_10s_cC;
+        } else {
+            int32_t diff = pred_10s_cC - s_clean_pred_10s_cC;
+            if (diff < 0) diff = -diff;
+            if (diff >= 1000) {
+                s_pred_10s_glitch_cnt++;
+                if (s_pred_10s_glitch_cnt <= 2) pred_10s_cC = s_clean_pred_10s_cC;
+                else { s_clean_pred_10s_cC = pred_10s_cC; s_pred_10s_glitch_cnt = 0; }
+            } else { s_clean_pred_10s_cC = pred_10s_cC; s_pred_10s_glitch_cnt = 0; }
+        }
 
-        /* Build and send the CSV line (10 fields) */
-        char  line[144];
+        /* Build and send the CSV line (11 fields) */
+        char  line[160];
         char *p = line;
-        p = put_uint (p, ts);            *p++ = ',';
-        p = put_fixed(p, vin_mV, 3U);    *p++ = ',';
-        p = put_fixed(p, vout_mV, 3U);   *p++ = ',';
-        p = put_fixed(p, i_cmA, 2U);     *p++ = ',';
-        p = put_fixed(p, ploss_cmW, 2U); *p++ = ',';
-        p = put_fixed(p, amb_cC, 2U);    *p++ = ',';
-        p = put_fixed(p, hs_cC, 2U);     *p++ = ',';
-        p = put_fixed(p, pred_cC, 2U);   *p++ = ',';
-        p = put_uint (p, infer_us);      *p++ = ',';
+        p = put_uint (p, ts);             *p++ = ',';
+        p = put_fixed(p, vin_mV, 3U);     *p++ = ',';
+        p = put_fixed(p, vout_mV, 3U);    *p++ = ',';
+        p = put_fixed(p, i_cmA, 2U);      *p++ = ',';
+        p = put_fixed(p, ploss_cmW, 2U);  *p++ = ',';
+        p = put_fixed(p, amb_cC, 2U);     *p++ = ',';
+        p = put_fixed(p, hs_cC, 2U);      *p++ = ',';
+        p = put_fixed(p, pred_3s_cC, 2U); *p++ = ',';
+        p = put_fixed(p, pred_10s_cC, 2U);*p++ = ',';
+        p = put_uint (p, infer_us);       *p++ = ',';
         p = put_uint (p, fault);
         *p++ = '\r'; *p++ = '\n';
         uart_write(line, (uint32_t)(p - line));

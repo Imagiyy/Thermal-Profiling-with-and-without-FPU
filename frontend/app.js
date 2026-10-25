@@ -22,12 +22,13 @@ const WINDOW_SEC          = 120;            // default rolling chart window (120
 const BUFFER_RETENTION_MS = 600 * 1000;     // retain up to 10 minutes (600 s) in memory for zoom/pan
 const MAX_POINTS          = 1500;           // maximum buffer headroom (12.5 mins at 500ms intervals)
 const CHART_COLORS = {
-  measured : "rgb(34,211,238)",   // cyan
-  predicted: "rgb(163,230,53)",   // lime
-  ambient  : "rgba(148,163,184,.6)", // gray-400
-  vdrop    : "rgb(251,191,36)",   // amber
-  current  : "rgb(96,165,250)",   // blue-400
-  power    : "rgb(251,113,133)",  // rose-400
+  measured : "rgb(34,211,238)",     // cyan
+  pred3s   : "rgb(163,230,53)",     // lime
+  pred10s  : "rgb(251,146,60)",     // orange / amber
+  ambient  : "rgba(148,163,184,.6)",// slate-400
+  vdrop    : "rgb(251,191,36)",     // amber
+  current  : "rgb(96,165,250)",     // blue-400
+  power    : "rgb(251,113,133)",    // rose-400
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -46,34 +47,32 @@ const connLabel    = $("conn-label");
 const btnResetPage = $("btn-reset-page");
 const btnExportCsv = $("btn-export-csv");
 
-const kpiErrorVal  = $("kpi-error-val");
-const kpiMaeVal    = $("kpi-mae-val");
-const kpiRmseVal   = $("kpi-rmse-val");
-const kpiPredTempVal= $("kpi-pred-temp-val");
-const kpiRthetaVal = $("kpi-rtheta-val");
-const kpiTempVal   = $("kpi-temp-val");
-const kpiPredTimeVal    = $("kpi-pred-time-val");
-const kpiPredTimeSub    = $("kpi-pred-time-sub");
-const kpiAvgPredTimeVal = $("kpi-avg-pred-time-val");
-const kpiAvgPredTimeSub = $("kpi-avg-pred-time-sub");
-const thermalDot        = $("thermal-dot");
-const thermalLabel      = $("thermal-label");
-const thermalMarker     = $("thermal-marker");
-const kpiThermal        = $("kpi-thermal");
+const kpiErrorVal   = $("kpi-error-val");
+const kpiAmbTempVal = $("kpi-amb-temp-val");
+const kpiRmseVal    = $("kpi-rmse-val");
+const kpiPred3sVal  = $("kpi-pred-3s-val");
+const kpiPred10sVal = $("kpi-pred-10s-val");
+const kpiRthetaVal  = $("kpi-rtheta-val");
+const kpiTempVal    = $("kpi-temp-val");
+const kpiPredTimeVal= $("kpi-pred-time-val");
+const kpiPredTimeSub= $("kpi-pred-time-sub");
+const thermalDot    = $("thermal-dot");
+const thermalLabel  = $("thermal-label");
+const thermalMarker = $("thermal-marker");
+const kpiThermal    = $("kpi-thermal");
 
 // Live readings
-const liveVin        = $("live-vin");
-const liveVout       = $("live-vout");
-const liveVdrop      = $("live-vdrop");
-const liveIload      = $("live-iload");
-const livePdiss      = $("live-pdiss");
-const liveTamb       = $("live-tamb");
-const liveTmeas      = $("live-tmeas");
-const liveTpred      = $("live-tpred");
-const liveLatency    = $("live-latency");
-const liveAvgLatency = $("live-avg-latency");
-const modelLatency   = $("model-latency");
-const modelAvgLatency= $("model-avg-latency");
+const liveVin       = $("live-vin");
+const liveVout      = $("live-vout");
+const liveVdrop     = $("live-vdrop");
+const liveIload     = $("live-iload");
+const livePdiss     = $("live-pdiss");
+const liveTamb      = $("live-tamb");
+const liveTmeas     = $("live-tmeas");
+const liveTpred3s   = $("live-tpred-3s");
+const liveTpred10s  = $("live-tpred-10s");
+const liveLatency   = $("live-latency");
+const modelLatency  = $("model-latency");
 
 const statFrames    = $("stat-frames");
 const statMalformed = $("stat-malformed");
@@ -97,9 +96,11 @@ let malformedCount = 0;
 let latencySum   = 0;
 let latencyCount = 0;
 
-// 3-second lookahead verification buffer (6 samples @ 500 ms)
-const LOOKAHEAD_SAMPLES = 6;
-const predLookaheadBuffer = [];
+// 3-second (6 samples @ 500 ms) and 10-second (20 samples @ 500 ms) lookahead verification buffers
+const LOOKAHEAD_3S_SAMPLES  = 6;
+const LOOKAHEAD_10S_SAMPLES = 20;
+const pred3sLookaheadBuffer  = [];
+const pred10sLookaheadBuffer = [];
 
 // Complete session telemetry buffer for CSV export (all 9 raw values + derived metrics)
 const sessionTelemetryLog = [];
@@ -196,7 +197,7 @@ const thermalChart = new Chart(thermalCtx, {
     labels: [],
     datasets: [
       {
-        label: "T measured (°C)",
+        label: "Heatsink Temp (°C)",
         data: [],
         borderColor: CHART_COLORS.measured,
         backgroundColor: "rgba(34,211,238,.08)",
@@ -206,18 +207,29 @@ const thermalChart = new Chart(thermalCtx, {
         fill: false,
       },
       {
-        label: "T predicted (+3 s lookahead)",
+        label: "T predicted (+3 s)",
         data: [],
-        borderColor: CHART_COLORS.predicted,
+        borderColor: CHART_COLORS.pred3s,
         backgroundColor: "rgba(163,230,53,.08)",
         borderWidth: 2,
         pointRadius: 0,
         tension: 0.3,
         fill: false,
-        borderDash: [6, 3],
+        borderDash: [5, 3],
       },
       {
-        label: "T ambient (°C)",
+        label: "T predicted (+10 s)",
+        data: [],
+        borderColor: CHART_COLORS.pred10s,
+        backgroundColor: "rgba(251,146,60,.08)",
+        borderWidth: 2,
+        pointRadius: 0,
+        tension: 0.3,
+        fill: false,
+        borderDash: [6, 4],
+      },
+      {
+        label: "Ambient Temp (°C)",
         data: [],
         borderColor: CHART_COLORS.ambient,
         backgroundColor: "rgba(148,163,184,.04)",
@@ -441,8 +453,10 @@ function stopAlarm() {
 
 let cleanTmeas = null;
 let measGlitchCount = 0;
-let cleanTpred = null;
-let predGlitchCount = 0;
+let cleanTpred3s = null;
+let pred3sGlitchCount = 0;
+let cleanTpred10s = null;
+let pred10sGlitchCount = 0;
 
 function filterTempGlitch(type, val, threshold = 10.0, maxPoints = 2) {
   if (type === "meas") {
@@ -454,7 +468,7 @@ function filterTempGlitch(type, val, threshold = 10.0, maxPoints = 2) {
     if (isGlitch) {
       measGlitchCount++;
       if (measGlitchCount <= maxPoints) {
-        return cleanTmeas; // Freeze display to last stable reading
+        return cleanTmeas;
       } else {
         cleanTmeas = val;
         measGlitchCount = 0;
@@ -465,30 +479,44 @@ function filterTempGlitch(type, val, threshold = 10.0, maxPoints = 2) {
       measGlitchCount = 0;
       return val;
     }
-  } else {
-    if (cleanTpred === null) {
-      if (val > 0) cleanTpred = val;
+  } else if (type === "pred3s") {
+    if (cleanTpred3s === null) {
+      if (val > 0) cleanTpred3s = val;
       return val;
     }
-    // If t_pred is actively closing the gap towards measured heatsink temp, accept immediately
-    if (cleanTmeas !== null && cleanTpred < cleanTmeas && val > cleanTpred && val <= (cleanTmeas + 2.0)) {
-      cleanTpred = val;
-      predGlitchCount = 0;
-      return val;
-    }
-    const isGlitch = (val <= 0) || Math.abs(val - cleanTpred) >= threshold;
+    const isGlitch = (val <= 0) || Math.abs(val - cleanTpred3s) >= threshold;
     if (isGlitch) {
-      predGlitchCount++;
-      if (predGlitchCount <= maxPoints) {
-        return cleanTpred; // Freeze display to last stable reading
+      pred3sGlitchCount++;
+      if (pred3sGlitchCount <= maxPoints) {
+        return cleanTpred3s;
       } else {
-        cleanTpred = val;
-        predGlitchCount = 0;
+        cleanTpred3s = val;
+        pred3sGlitchCount = 0;
         return val;
       }
     } else {
-      cleanTpred = val;
-      predGlitchCount = 0;
+      cleanTpred3s = val;
+      pred3sGlitchCount = 0;
+      return val;
+    }
+  } else {
+    if (cleanTpred10s === null) {
+      if (val > 0) cleanTpred10s = val;
+      return val;
+    }
+    const isGlitch = (val <= 0) || Math.abs(val - cleanTpred10s) >= threshold;
+    if (isGlitch) {
+      pred10sGlitchCount++;
+      if (pred10sGlitchCount <= maxPoints) {
+        return cleanTpred10s;
+      } else {
+        cleanTpred10s = val;
+        pred10sGlitchCount = 0;
+        return val;
+      }
+    } else {
+      cleanTpred10s = val;
+      pred10sGlitchCount = 0;
       return val;
     }
   }
@@ -497,8 +525,10 @@ function filterTempGlitch(type, val, threshold = 10.0, maxPoints = 2) {
 function resetTempGlitchFilters() {
   cleanTmeas = null;
   measGlitchCount = 0;
-  cleanTpred = null;
-  predGlitchCount = 0;
+  cleanTpred3s = null;
+  pred3sGlitchCount = 0;
+  cleanTpred10s = null;
+  pred10sGlitchCount = 0;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -512,26 +542,42 @@ function handleTelemetry(d) {
   frameCount++;
   statFrames.textContent = frameCount;
 
-  // ── Transient Glitch Filter (Freezes display if temp fluctuates >= 10 °C for <= 2 points) ──
-  d.T_measured = filterTempGlitch("meas", d.T_measured);
-  d.T_predicted = filterTempGlitch("pred", d.T_predicted);
+  // ── Transient Glitch Filter ──
+  const pred3sRaw = d.T_predicted_3s !== undefined ? d.T_predicted_3s : (d.T_predicted !== undefined ? d.T_predicted : d.T_measured);
+  const pred10sRaw = d.T_predicted_10s !== undefined ? d.T_predicted_10s : pred3sRaw;
 
-  // ── 3-Second Lookahead Error: Compare current ground truth with prediction made 3 s ago ──
-  predLookaheadBuffer.push(d.T_predicted);
-  if (predLookaheadBuffer.length > LOOKAHEAD_SAMPLES) {
-    const pastPred = predLookaheadBuffer.shift();
-    d.tracking_error = Math.abs(d.T_measured - pastPred);
+  d.T_measured      = filterTempGlitch("meas", d.T_measured);
+  d.T_predicted_3s  = filterTempGlitch("pred3s", pred3sRaw);
+  d.T_predicted_10s = filterTempGlitch("pred10s", pred10sRaw);
+  d.T_predicted     = d.T_predicted_3s;
+
+  // ── Lookahead Errors: Compare current ground truth with predictions made 3s and 10s ago ──
+  pred3sLookaheadBuffer.push(d.T_predicted_3s);
+  if (pred3sLookaheadBuffer.length > LOOKAHEAD_3S_SAMPLES) {
+    const pastPred3s = pred3sLookaheadBuffer.shift();
+    d.tracking_error_3s = Math.abs(d.T_measured - pastPred3s);
   } else {
-    d.tracking_error = Math.abs(d.T_measured - d.T_predicted);
+    d.tracking_error_3s = Math.abs(d.T_measured - d.T_predicted_3s);
   }
+
+  pred10sLookaheadBuffer.push(d.T_predicted_10s);
+  if (pred10sLookaheadBuffer.length > LOOKAHEAD_10S_SAMPLES) {
+    const pastPred10s = pred10sLookaheadBuffer.shift();
+    d.tracking_error_10s = Math.abs(d.T_measured - pastPred10s);
+  } else {
+    d.tracking_error_10s = Math.abs(d.T_measured - d.T_predicted_10s);
+  }
+
+  d.tracking_error = d.tracking_error_3s;
 
   const ts = d.timestamp_ms;
 
-  // ── Push to thermal chart ──
+  // ── Push 4 lines to thermal chart: Heatsink, Pred(+3s), Pred(+10s), Ambient ──
   thermalChart.data.labels.push(ts);
   thermalChart.data.datasets[0].data.push({ x: ts, y: d.T_measured });
-  thermalChart.data.datasets[1].data.push({ x: ts, y: d.T_predicted });
-  thermalChart.data.datasets[2].data.push({ x: ts, y: d.T_ambient });
+  thermalChart.data.datasets[1].data.push({ x: ts, y: d.T_predicted_3s });
+  thermalChart.data.datasets[2].data.push({ x: ts, y: d.T_predicted_10s });
+  thermalChart.data.datasets[3].data.push({ x: ts, y: d.T_ambient });
 
   // ── Push to electrical chart ──
   elecChart.data.labels.push(ts);
@@ -539,7 +585,7 @@ function handleTelemetry(d) {
   elecChart.data.datasets[1].data.push({ x: ts, y: d.I_mA });
   elecChart.data.datasets[2].data.push({ x: ts, y: d.P_mW });
 
-  // ── Record frame into session export log (all raw values + infer_us + derived metrics) ──
+  // ── Record frame into session export log ──
   sessionTelemetryLog.push({
     timestamp_ms: d.timestamp_ms,
     iso_time: new Date().toISOString(),
@@ -550,9 +596,11 @@ function handleTelemetry(d) {
     P_mW: d.P_mW,
     T_ambient: d.T_ambient,
     T_measured: d.T_measured,
-    T_predicted: d.T_predicted,
+    T_predicted_3s: d.T_predicted_3s,
+    T_predicted_10s: d.T_predicted_10s,
     infer_us: d.infer_us !== undefined ? d.infer_us : 0,
-    tracking_error: d.tracking_error,
+    tracking_error_3s: d.tracking_error_3s,
+    tracking_error_10s: d.tracking_error_10s,
     R_theta_JA: d.R_theta_JA !== null ? d.R_theta_JA : "",
     fault_code: d.fault_code,
     fault_flags: (d.faults && d.faults.length > 0) ? d.faults.join("|") : "OK",
@@ -560,11 +608,11 @@ function handleTelemetry(d) {
 
   currentLatestTs = ts;
 
-  // ── Advance live rolling window (maintains custom zoom level in real-time) ──
+  // ── Advance live rolling window ──
   advanceLiveWindow(thermalChart, ts);
   advanceLiveWindow(elecChart, ts);
 
-  // ── Trim historical buffer (retains up to 10 minutes) ──
+  // ── Trim historical buffer ──
   trimChart(thermalChart, ts);
   trimChart(elecChart, ts);
 
@@ -574,20 +622,31 @@ function handleTelemetry(d) {
     elecChart.update("none");
   });
 
-  // ── KPI: Tracking error ──
-  const tErr = d.tracking_error;
-  kpiErrorVal.textContent = tErr.toFixed(2);
+  // ── KPI: Tracking error (displays 3s and 10s lookahead error) ──
+  if (kpiErrorVal) {
+    kpiErrorVal.textContent = `${d.tracking_error_3s.toFixed(2)} / ${d.tracking_error_10s.toFixed(2)}`;
+  }
 
-  // ── KPI: MAE & RMSE ──
+  // ── KPI: Ambient Temp (Replaced MAE) ──
+  if (kpiAmbTempVal) {
+    kpiAmbTempVal.textContent = d.T_ambient.toFixed(2) + " °C";
+  }
+
+  // ── KPI: RMSE ──
+  const tErr = d.tracking_error_3s;
   errorSum   += tErr;
   errorSqSum += tErr * tErr;
   errorCount++;
-  kpiMaeVal.textContent  = (errorSum / errorCount).toFixed(3);
-  kpiRmseVal.textContent = Math.sqrt(errorSqSum / errorCount).toFixed(3);
+  if (kpiRmseVal) {
+    kpiRmseVal.textContent = Math.sqrt(errorSqSum / errorCount).toFixed(3);
+  }
 
-  // ── KPI: Predicted Temperature ──
-  if (kpiPredTempVal) {
-    kpiPredTempVal.textContent = d.T_predicted.toFixed(2) + " °C";
+  // ── KPI: Predicted Temperatures (+3s and +10s) ──
+  if (kpiPred3sVal) {
+    kpiPred3sVal.textContent = d.T_predicted_3s.toFixed(2) + " °C";
+  }
+  if (kpiPred10sVal) {
+    kpiPred10sVal.textContent = d.T_predicted_10s.toFixed(2) + " °C";
   }
   if (kpiRthetaVal) {
     kpiRthetaVal.textContent = d.R_theta_JA != null ? d.R_theta_JA.toFixed(2) : "—";
@@ -598,12 +657,11 @@ function handleTelemetry(d) {
   kpiTempVal.textContent = t.toFixed(1) + " °C";
   updateThermalZone(t);
 
-  // ── KPI: Prediction Time & Average Prediction Time ──
+  // ── KPI: Prediction Time (DWT Latency) ──
   const inferUs = (d.infer_us !== undefined && d.infer_us !== null) ? Number(d.infer_us) : 0;
   if (inferUs > 0) {
     latencySum += inferUs;
     latencyCount++;
-    const avgUs = latencySum / latencyCount;
 
     const fmtLatency = (val) => (val >= 1000 ? `${(val / 1000).toFixed(2)} ms` : `${Math.round(val)} µs`);
 
@@ -614,27 +672,23 @@ function handleTelemetry(d) {
         : `${(inferUs / 1000).toFixed(3)} ms · DWT`;
     }
 
-    if (kpiAvgPredTimeVal) kpiAvgPredTimeVal.textContent = fmtLatency(avgUs);
-    if (kpiAvgPredTimeSub) kpiAvgPredTimeSub.textContent = `Mean (${latencyCount} runs)`;
-
     if (liveLatency) liveLatency.textContent = fmtLatency(inferUs);
-    if (liveAvgLatency) liveAvgLatency.textContent = fmtLatency(avgUs);
     if (modelLatency) modelLatency.textContent = fmtLatency(inferUs);
-    if (modelAvgLatency) modelAvgLatency.textContent = fmtLatency(avgUs);
   }
 
   // ── MAX31855 fault decode (sidebar indicators) ──
   updateFaults(d.fault_code, d.faults);
 
   // ── Live readings ──
-  liveVin.textContent   = d.V_in.toFixed(3)   + " V";
-  liveVout.textContent  = d.V_out.toFixed(3)   + " V";
-  liveVdrop.textContent = d.V_drop.toFixed(3)  + " V";
-  liveIload.textContent = d.I_mA.toFixed(1)    + " mA";
-  livePdiss.textContent = d.P_mW.toFixed(1)    + " mW";
-  liveTamb.textContent  = d.T_ambient.toFixed(2)  + " °C";
-  liveTmeas.textContent = d.T_measured.toFixed(2) + " °C";
-  liveTpred.textContent = d.T_predicted.toFixed(2)+ " °C";
+  liveVin.textContent      = d.V_in.toFixed(3)   + " V";
+  liveVout.textContent     = d.V_out.toFixed(3)   + " V";
+  liveVdrop.textContent    = d.V_drop.toFixed(3)  + " V";
+  liveIload.textContent    = d.I_mA.toFixed(1)    + " mA";
+  livePdiss.textContent    = d.P_mW.toFixed(1)    + " mW";
+  liveTamb.textContent     = d.T_ambient.toFixed(2)  + " °C";
+  liveTmeas.textContent    = d.T_measured.toFixed(2) + " °C";
+  if (liveTpred3s)  liveTpred3s.textContent  = d.T_predicted_3s.toFixed(2)  + " °C";
+  if (liveTpred10s) liveTpred10s.textContent = d.T_predicted_10s.toFixed(2) + " °C";
 }
 
 function advanceLiveWindow(chart, latestTs) {
@@ -833,7 +887,8 @@ async function doConnect() {
     if (res.ok) {
       setConnectionUI(true);
       // Reset session metrics
-      predLookaheadBuffer.length = 0;
+      pred3sLookaheadBuffer.length = 0;
+      pred10sLookaheadBuffer.length = 0;
       errorSum = errorSqSum = errorCount = frameCount = malformedCount = 0;
       latencySum = latencyCount = 0;
     } else {
@@ -870,9 +925,11 @@ function exportSessionCSV() {
     "P_mW",
     "T_ambient",
     "T_measured",
-    "T_predicted",
+    "T_predicted_3s",
+    "T_predicted_10s",
     "infer_us",
-    "tracking_error",
+    "tracking_error_3s",
+    "tracking_error_10s",
     "R_theta_JA",
     "fault_code",
     "fault_flags",
@@ -936,20 +993,20 @@ async function resetWholePage() {
   latencyCount = 0;
   currentLatestTs = 0;
   sessionTelemetryLog.length = 0;
-  predLookaheadBuffer.length = 0;
+  pred3sLookaheadBuffer.length = 0;
+  pred10sLookaheadBuffer.length = 0;
   sessionStart = null;
 
   // Reset all top row KPI cards
   kpiErrorVal.textContent = "—";
-  kpiMaeVal.textContent = "—";
+  if (kpiAmbTempVal) kpiAmbTempVal.textContent = "—";
   kpiRmseVal.textContent = "—";
-  if (kpiPredTempVal) kpiPredTempVal.textContent = "—";
+  if (kpiPred3sVal) kpiPred3sVal.textContent = "—";
+  if (kpiPred10sVal) kpiPred10sVal.textContent = "—";
   kpiTempVal.textContent = "—";
   kpiTempVal.className = "text-xl font-bold text-emerald-400 tabular-nums";
   if (kpiPredTimeVal) kpiPredTimeVal.textContent = "—";
   if (kpiPredTimeSub) kpiPredTimeSub.textContent = "DWT Cycle Latency";
-  if (kpiAvgPredTimeVal) kpiAvgPredTimeVal.textContent = "—";
-  if (kpiAvgPredTimeSub) kpiAvgPredTimeSub.textContent = "Session Mean";
 
   // Reset thermal zone & safety indicators
   thermalMarker.style.left = "1%";
@@ -967,11 +1024,10 @@ async function resetWholePage() {
   livePdiss.textContent = "—";
   liveTamb.textContent = "—";
   liveTmeas.textContent = "—";
-  liveTpred.textContent = "—";
+  if (liveTpred3s) liveTpred3s.textContent = "—";
+  if (liveTpred10s) liveTpred10s.textContent = "—";
   if (liveLatency) liveLatency.textContent = "—";
-  if (liveAvgLatency) liveAvgLatency.textContent = "—";
   if (modelLatency) modelLatency.textContent = "—";
-  if (modelAvgLatency) modelAvgLatency.textContent = "—";
 
   // Reset session stats
   statFrames.textContent = "0";

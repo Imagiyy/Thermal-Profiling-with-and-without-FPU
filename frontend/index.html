@@ -163,16 +163,14 @@
       <div id="kpi-error" class="glass rounded-xl p-3 flex flex-col gap-0.5 transition-all hover:border-white/10">
         <span class="text-[10px] uppercase tracking-wider text-gray-500 font-medium">Tracking Error</span>
         <span id="kpi-error-val" class="text-xl font-bold text-accent-cyan tabular-nums">—</span>
-        <!-- [10s Prediction]: <span class="text-[10px] text-gray-500">|T<sub>meas</sub>(now) − T<sub>pred</sub>(10 s ago)| °C</span> -->
-        <!-- [3s Prediction]: Active -->
-        <span class="text-[10px] text-gray-500">|T<sub>meas</sub>(now) − T<sub>pred</sub>(3 s ago)| °C</span>
+        <span class="text-[10px] text-gray-500">3s / 10s lookahead error °C</span>
       </div>
 
-      <!-- KPI: MAE -->
-      <div class="glass rounded-xl p-3 flex flex-col gap-0.5 transition-all hover:border-white/10">
-        <span class="text-[10px] uppercase tracking-wider text-gray-500 font-medium">Session MAE</span>
-        <span id="kpi-mae-val" class="text-xl font-bold text-brand-400 tabular-nums">—</span>
-        <span class="text-[10px] text-gray-500">Mean Abs. Error °C</span>
+      <!-- KPI: Ambient Temp (Replaced MAE) -->
+      <div id="kpi-amb-temp" class="glass rounded-xl p-3 flex flex-col gap-0.5 transition-all hover:border-white/10">
+        <span class="text-[10px] uppercase tracking-wider text-gray-500 font-medium">Ambient Temp</span>
+        <span id="kpi-amb-temp-val" class="text-xl font-bold text-accent-cyan tabular-nums">—</span>
+        <span class="text-[10px] text-gray-500">BME280 Environment °C</span>
       </div>
 
       <!-- KPI: RMSE -->
@@ -182,12 +180,18 @@
         <span class="text-[10px] text-gray-500">Root Mean Sq. Error °C</span>
       </div>
 
-      <!-- KPI: Predicted Temp -->
-      <div id="kpi-pred-temp" class="glass rounded-xl p-3 flex flex-col gap-0.5 transition-all hover:border-white/10">
-        <span class="text-[10px] uppercase tracking-wider text-gray-500 font-medium">Predicted Temp</span>
-        <span id="kpi-pred-temp-val" class="text-xl font-bold text-accent-lime tabular-nums">—</span>
-        <!-- [3s Prediction]: Active -->
+      <!-- KPI: Predicted Temp (+3s) -->
+      <div id="kpi-pred-3s" class="glass rounded-xl p-3 flex flex-col gap-0.5 transition-all hover:border-white/10">
+        <span class="text-[10px] uppercase tracking-wider text-gray-500 font-medium">Pred Temp (+3s)</span>
+        <span id="kpi-pred-3s-val" class="text-xl font-bold text-accent-lime tabular-nums">—</span>
         <span class="text-[10px] text-gray-500">T<sub>pred</sub> forecast for +3 s °C</span>
+      </div>
+
+      <!-- KPI: Predicted Temp (+10s) -->
+      <div id="kpi-pred-10s" class="glass rounded-xl p-3 flex flex-col gap-0.5 transition-all hover:border-white/10">
+        <span class="text-[10px] uppercase tracking-wider text-gray-500 font-medium">Pred Temp (+10s)</span>
+        <span id="kpi-pred-10s-val" class="text-xl font-bold text-orange-400 tabular-nums">—</span>
+        <span class="text-[10px] text-gray-500">T<sub>pred</sub> forecast for +10 s °C</span>
       </div>
 
       <!-- KPI: Thermal Safety -->
@@ -206,13 +210,6 @@
         <span id="kpi-pred-time-val" class="text-xl font-bold text-accent-lime tabular-nums">—</span>
         <span id="kpi-pred-time-sub" class="text-[10px] text-gray-500">DWT Cycle Latency</span>
       </div>
-
-      <!-- KPI: Average Prediction Time -->
-      <div id="kpi-avg-pred-time" class="glass rounded-xl p-3 flex flex-col gap-0.5 transition-all hover:border-white/10">
-        <span class="text-[10px] uppercase tracking-wider text-gray-500 font-medium">Avg Pred. Time</span>
-        <span id="kpi-avg-pred-time-val" class="text-xl font-bold text-brand-400 tabular-nums">—</span>
-        <span id="kpi-avg-pred-time-sub" class="text-[10px] text-gray-500">Session Mean</span>
-      </div>
     </section>
 
     <!-- ─── THERMAL CHART ─── -->
@@ -220,9 +217,7 @@
       <div class="flex items-center justify-between mb-2">
         <div>
           <h2 class="text-sm font-semibold text-gray-200">Thermal Tracking</h2>
-          <!-- [10s Prediction]: <p class="text-[10px] text-gray-500">T<sub>measured</sub> vs T<sub>predicted</sub> (made 10 s earlier) vs T<sub>ambient</sub> — <span id="thermal-window-lbl">120s</span> window</p> -->
-          <!-- [3s Prediction]: Active -->
-          <p class="text-[10px] text-gray-500">T<sub>measured</sub> vs T<sub>predicted</sub> (made 3 s earlier) vs T<sub>ambient</sub> — <span id="thermal-window-lbl">120s</span> window</p>
+          <p class="text-[10px] text-gray-500">T<sub>measured</sub> vs T<sub>pred</sub> (+3s) vs T<sub>pred</sub> (+10s) vs T<sub>ambient</sub> — <span id="thermal-window-lbl">120s</span> window</p>
         </div>
         <div class="flex items-center gap-1 bg-surface-850 p-1 rounded-lg border border-white/5">
           <button id="btn-thermal-zoom-in" title="Zoom In (+)" class="w-6 h-6 flex items-center justify-center text-xs font-bold rounded bg-white/5 hover:bg-white/15 text-gray-300 hover:text-white transition-colors">+</button>
@@ -277,9 +272,9 @@
             <tr><td class="py-1 text-gray-400">P<sub>diss</sub></td><td id="live-pdiss" class="py-1 text-right font-mono tabular-nums">—</td></tr>
             <tr><td class="py-1 text-gray-400">T<sub>ambient</sub></td><td id="live-tamb" class="py-1 text-right font-mono tabular-nums">—</td></tr>
             <tr><td class="py-1 text-gray-400">T<sub>measured</sub></td><td id="live-tmeas" class="py-1 text-right font-mono tabular-nums">—</td></tr>
-            <tr><td class="py-1 text-gray-400">T<sub>predicted</sub></td><td id="live-tpred" class="py-1 text-right font-mono tabular-nums">—</td></tr>
+            <tr><td class="py-1 text-gray-400">T<sub>pred (+3s)</sub></td><td id="live-tpred-3s" class="py-1 text-right font-mono tabular-nums text-accent-lime">—</td></tr>
+            <tr><td class="py-1 text-gray-400">T<sub>pred (+10s)</sub></td><td id="live-tpred-10s" class="py-1 text-right font-mono tabular-nums text-orange-400">—</td></tr>
             <tr><td class="py-1 text-gray-400">Pred. Time</td><td id="live-latency" class="py-1 text-right font-mono tabular-nums text-accent-lime">—</td></tr>
-            <tr><td class="py-1 text-gray-400">Avg Pred. Time</td><td id="live-avg-latency" class="py-1 text-right font-mono tabular-nums text-brand-400">—</td></tr>
           </tbody>
         </table>
       </div>
@@ -327,7 +322,6 @@
           <div>MCU: <span class="text-gray-200">STM32F401RE (16 MHz)</span></div>
           <div>Board: <span class="text-gray-200">Nucleo-F401RE</span></div>
           <div>Pred. Time: <span id="model-latency" class="text-accent-lime font-mono font-medium">—</span></div>
-          <div>Avg Latency: <span id="model-avg-latency" class="text-brand-400 font-mono font-medium">—</span></div>
         </div>
       </div>
     </section>

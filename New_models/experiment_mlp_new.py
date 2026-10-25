@@ -1,25 +1,22 @@
 #!/usr/bin/env python3
 """
-experiment_mlp_new.py -- Thermal Predictor MLP: Stateless 4-Feature Model.
+experiment_mlp_new.py -- Thermal Predictor MLP: Stateless 4-Feature Dual-Prediction Model.
 
-Features: [heatsink_temp_C, ambient_temp_C, power_loss_mW, current_mA] -> future_temp (+3s)
+Features: [heatsink_temp_C, ambient_temp_C, power_loss_mW, current_mA] -> [future_3s, future_10s]
 
 Why no elapsed_time?
   The previous model used g_sample_count (elapsed minutes) as its 4th feature.
   This counter always starts at 0 when prediction is activated -- even if the
-  heatsink is already at 60 degC mid-heating. This mismatch (hot heatsink +
-  elapsed_time=0) causes large prediction errors when starting mid-heat.
+  heatsink is already at 60 degC mid-heating. This mismatch causes large prediction errors.
   By replacing elapsed_time with power_loss_mW and current_mA the model is
   STATELESS: it knows thermal state (T_hs, T_amb) AND electrical drive state
   (P_loss, I) at each call without any internal counter. Starting mid-heating
   is now fully supported with no error.
 
-Leakage Prevention Guarantees:
-  - Temporal Split: Train on first 80% of continuous time, test on final 20%.
-  - Scaler: StandardScaler fit ONLY on training data, only transform on test.
-  - Label Leakage: Dropped any pre-existing 'predicted_temp_C'.
-  - Physical Filter: Filters Vin < 10V, sensor overflows, T_hs <= 20 degC.
-  - No Future-to-Present Leakage: target is strictly +3s (6 samples) ahead.
+Dual Prediction Windows:
+  - 3-second lookahead (6 samples ahead @ 500 ms)
+  - 10-second lookahead (20 samples ahead @ 500 ms)
+  Trained simultaneously via a dual-output MLP with zero data leakage.
 """
 
 from __future__ import annotations
@@ -45,15 +42,16 @@ OUTPUT_DIR  = SCRIPT_DIR
 
 ## 4 stateless features -- no elapsed_time dependency
 FEATURES = ["heatsink_temp_C", "ambient_temp_C", "power_loss_mW", "current_mA"]
-TARGET   = "delta_T"
+TARGETS  = ["delta_T_3s", "delta_T_10s"]
 N_INPUTS = len(FEATURES)   # 4
+N_OUTPUTS = len(TARGETS)   # 2
 
 # -----------------------------------------------------------------------
 # 1. DATA PREPROCESSING
 # -----------------------------------------------------------------------
 def load_and_preprocess() -> pd.DataFrame:
     print("=" * 70)
-    print("  STEP 1: LEAKAGE-FREE DATA PREPROCESSING")
+    print("  STEP 1: LEAKAGE-FREE DATA PREPROCESSING (DUAL 3S & 10S HORIZONS)")
     print("=" * 70)
 
     frames = []
@@ -79,9 +77,14 @@ def load_and_preprocess() -> pd.DataFrame:
         )
         df_clean = df[mask].copy()
         df_clean["source"] = f.stem
-        df_clean["temp_future_3s"] = df_clean["heatsink_temp_C"].shift(-6)
-        df_clean = df_clean.dropna(subset=["temp_future_3s"]).copy()
-        df_clean["delta_T"] = df_clean["temp_future_3s"] - df_clean["heatsink_temp_C"]
+
+        # Lookaheads: 3s (6 samples) and 10s (20 samples) ahead
+        df_clean["temp_future_3s"]  = df_clean["heatsink_temp_C"].shift(-6)
+        df_clean["temp_future_10s"] = df_clean["heatsink_temp_C"].shift(-20)
+        df_clean = df_clean.dropna(subset=["temp_future_3s", "temp_future_10s"]).copy()
+
+        df_clean["delta_T_3s"]  = df_clean["temp_future_3s"] - df_clean["heatsink_temp_C"]
+        df_clean["delta_T_10s"] = df_clean["temp_future_10s"] - df_clean["heatsink_temp_C"]
 
         print(f"  [Clean] {f.name:12s}: {raw_len} raw -> {len(df_clean)} clean "
               f"(T_hs: {df_clean['heatsink_temp_C'].min():.1f} -> "
@@ -100,13 +103,9 @@ def load_and_preprocess() -> pd.DataFrame:
 def augment_training_data(df_train: pd.DataFrame) -> pd.DataFrame:
     """
     Augment training data for ambient temperature robustness.
-    Lab had nearly-constant ambient (~33.2 degC); without augmentation the
-    scaler assigns tiny scale to ambient_temp_C causing extrapolation spikes.
-    Physics-consistent: shifting room ambient and heatsink by s shifts the entire
-    system by s without distorting thermal gradients.
+    Shifts room ambient and heatsink by s without distorting thermal gradients.
     """
     tau = 208.0  # thermal time constant (s)
-    dt  = 3.0    # prediction horizon (s)
     shifts = [-15.0, -12.0, -9.0, -6.0, -3.0, 0.0, +3.0, +5.0, +8.0, +10.0]
 
     augmented = []
@@ -115,7 +114,9 @@ def augment_training_data(df_train: pd.DataFrame) -> pd.DataFrame:
         d["ambient_temp_C"]  = d["ambient_temp_C"]  + s + np.random.normal(0, 0.05, len(d))
         d["heatsink_temp_C"] = d["heatsink_temp_C"] + s
         d["temp_future_3s"]  = d["temp_future_3s"]  + s
-        d["delta_T"]         = d["temp_future_3s"] - d["heatsink_temp_C"]
+        d["temp_future_10s"] = d["temp_future_10s"] + s
+        d["delta_T_3s"]      = d["temp_future_3s"] - d["heatsink_temp_C"]
+        d["delta_T_10s"]     = d["temp_future_10s"] - d["heatsink_temp_C"]
         augmented.append(d)
 
     rng = np.random.default_rng(42)
@@ -123,15 +124,18 @@ def augment_training_data(df_train: pd.DataFrame) -> pd.DataFrame:
     for amb in np.linspace(15.0, 45.0, 30):
         for overheat in np.linspace(0.0, 15.0, 10):
             hs = amb + overheat + rng.normal(0, 0.05)
-            cooling_delta = -(overheat) / tau * dt
+            cooling_delta_3s  = -(overheat) / tau * 3.0
+            cooling_delta_10s = -(overheat) / tau * 10.0
             for _ in range(3):
                 standby.append({
                     "heatsink_temp_C": hs,
                     "ambient_temp_C":  amb + rng.normal(0, 0.05),
                     "power_loss_mW":   0.0,
                     "current_mA":      0.0,
-                    "temp_future_3s":  hs + cooling_delta,
-                    "delta_T":         cooling_delta,
+                    "temp_future_3s":  hs + cooling_delta_3s,
+                    "temp_future_10s": hs + cooling_delta_10s,
+                    "delta_T_3s":      cooling_delta_3s,
+                    "delta_T_10s":     cooling_delta_10s,
                     "source":          "standby_anchor",
                 })
     df_standby = pd.DataFrame(standby)
@@ -145,11 +149,11 @@ def augment_training_data(df_train: pd.DataFrame) -> pd.DataFrame:
 # 3. ARCHITECTURE SEARCH
 # -----------------------------------------------------------------------
 ARCHITECTURES = {
-    "small_32":      (32,),
+    "small_32": (32,),
 }
 
-def compute_hw_stats(n_inputs: int, hidden: tuple) -> dict:
-    sizes = [n_inputs] + list(hidden) + [1]
+def compute_hw_stats(n_inputs: int, hidden: tuple, n_outputs: int = 2) -> dict:
+    sizes = [n_inputs] + list(hidden) + [n_outputs]
     params = sum(sizes[i]*sizes[i+1] + sizes[i+1] for i in range(len(sizes)-1))
     return {
         "params":        params,
@@ -160,9 +164,9 @@ def compute_hw_stats(n_inputs: int, hidden: tuple) -> dict:
 
 def run_architecture_search(df: pd.DataFrame):
     print("\n" + "=" * 70)
-    print("  STEP 2: ARCHITECTURE SEARCH (RESIDUAL LEARNING, ZERO LEAKAGE)")
+    print("  STEP 2: ARCHITECTURE SEARCH (DUAL RESIDUAL LEARNING, ZERO LEAKAGE)")
     print("=" * 70)
-    print(f"  Features: {FEATURES} -> Target: {TARGET}")
+    print(f"  Features: {FEATURES} -> Targets: {TARGETS}")
 
     train_dfs, test_dfs = [], []
     for src in df["source"].unique():
@@ -183,12 +187,12 @@ def run_architecture_search(df: pd.DataFrame):
     scaler = StandardScaler()
     X_train_s = scaler.fit_transform(df_train[FEATURES].values)
     X_test_s  = scaler.transform(df_test[FEATURES].values)
-    y_train = df_train[TARGET].values
-    y_test  = df_test[TARGET].values
+    y_train = df_train[TARGETS].values
+    y_test  = df_test[TARGETS].values
 
     all_results = []
     for arch_name, hidden in ARCHITECTURES.items():
-        hw = compute_hw_stats(N_INPUTS, hidden)
+        hw = compute_hw_stats(N_INPUTS, hidden, N_OUTPUTS)
         mlp = MLPRegressor(hidden_layer_sizes=hidden, activation="relu", solver="adam",
                            alpha=1e-4, learning_rate_init=2e-3, max_iter=1000,
                            tol=1e-6, random_state=42)
@@ -197,27 +201,35 @@ def run_architecture_search(df: pd.DataFrame):
         elapsed = time.time() - t0
 
         pred_delta = mlp.predict(X_test_s)
-        pred_future = df_test["heatsink_temp_C"].values + pred_delta
-        actual_future = df_test["temp_future_3s"].values
+        pred_future_3s  = df_test["heatsink_temp_C"].values + pred_delta[:, 0]
+        pred_future_10s = df_test["heatsink_temp_C"].values + pred_delta[:, 1]
+        actual_future_3s  = df_test["temp_future_3s"].values
+        actual_future_10s = df_test["temp_future_10s"].values
 
-        mae     = mean_absolute_error(actual_future, pred_future)
-        rmse    = np.sqrt(mean_squared_error(actual_future, pred_future))
-        r2      = r2_score(actual_future, pred_future)
-        tr_pred_future = df_train["heatsink_temp_C"].values + mlp.predict(X_train_s)
-        tr_mae  = mean_absolute_error(df_train["temp_future_3s"].values, tr_pred_future)
+        mae_3s   = mean_absolute_error(actual_future_3s, pred_future_3s)
+        rmse_3s  = np.sqrt(mean_squared_error(actual_future_3s, pred_future_3s))
+        r2_3s    = r2_score(actual_future_3s, pred_future_3s)
+
+        mae_10s  = mean_absolute_error(actual_future_10s, pred_future_10s)
+        rmse_10s = np.sqrt(mean_squared_error(actual_future_10s, pred_future_10s))
+        r2_10s   = r2_score(actual_future_10s, pred_future_10s)
+
+        avg_mae = (mae_3s + mae_10s) / 2.0
 
         print(f"    {arch_name:<16s} {str(hidden):<14s} params={hw['params']:<5d} "
-              f"MAE={mae:.4f}C  RMSE={rmse:.4f}C  R2={r2:.4f}  "
-              f"lat={hw['est_latency_us']:>6.1f}us  ({mlp.n_iter_:3d} iters, {elapsed:.1f}s)")
+              f"3s MAE={mae_3s:.4f}C (R2={r2_3s:.4f}) | "
+              f"10s MAE={mae_10s:.4f}C (R2={r2_10s:.4f}) | "
+              f"lat={hw['est_latency_us']:>5.1f}us  ({mlp.n_iter_:3d} iters, {elapsed:.1f}s)")
 
         all_results.append({
             "architecture": arch_name, "hidden": list(hidden),
-            "features": FEATURES, "target": TARGET,
+            "features": FEATURES, "targets": TARGETS,
             "params": hw["params"], "flash_bytes": hw["flash_bytes"],
             "est_latency_us": hw["est_latency_us"],
-            "test_mae": round(mae, 4), "test_rmse": round(rmse, 4), "test_r2": round(r2, 4),
-            "train_mae": round(tr_mae, 4), "n_iter": mlp.n_iter_,
-            "train_time_s": round(elapsed, 2),
+            "test_mae": round(avg_mae, 4),
+            "test_mae_3s": round(mae_3s, 4), "test_rmse_3s": round(rmse_3s, 4), "test_r2_3s": round(r2_3s, 4),
+            "test_mae_10s": round(mae_10s, 4), "test_rmse_10s": round(rmse_10s, 4), "test_r2_10s": round(r2_10s, 4),
+            "n_iter": mlp.n_iter_, "train_time_s": round(elapsed, 2),
         })
 
     return all_results, df_train_raw, df_test
@@ -228,29 +240,33 @@ def run_architecture_search(df: pd.DataFrame):
 # -----------------------------------------------------------------------
 def train_and_export_best(df: pd.DataFrame, results: list) -> tuple:
     print("\n" + "=" * 70)
-    print("  STEP 3: TRAIN FINAL MODEL & EXPORT C CODE")
+    print("  STEP 3: TRAIN FINAL DUAL-HORIZON MODEL & EXPORT PARAMETERS")
     print("=" * 70)
 
     best = sorted(results, key=lambda x: x["test_mae"])[0]
-    print(f"  Best: {best['architecture']} {best['hidden']}  Future MAE={best['test_mae']:.4f}C  R2={best['test_r2']:.4f}")
+    print(f"  Best: {best['architecture']} {best['hidden']} | 3s MAE={best['test_mae_3s']:.4f}C | 10s MAE={best['test_mae_10s']:.4f}C")
 
     hidden = tuple(best["hidden"])
-    df_aug  = augment_training_data(df)
+    df_aug = augment_training_data(df)
 
     scaler = StandardScaler()
     X = scaler.fit_transform(df_aug[FEATURES].values)
-    y = df_aug[TARGET].values
+    y = df_aug[TARGETS].values
 
     mlp = MLPRegressor(hidden_layer_sizes=hidden, activation="relu", solver="adam",
                        alpha=1e-4, learning_rate_init=2e-3, max_iter=2000,
                        tol=1e-7, random_state=42)
     mlp.fit(X, y)
-    full_pred_future = df_aug["heatsink_temp_C"].values + mlp.predict(X)
-    full_mae = mean_absolute_error(df_aug["temp_future_3s"].values, full_pred_future)
-    print(f"  Full dataset refit MAE: {full_mae:.4f}C")
 
-    joblib.dump({"model": mlp, "scaler": scaler, "features": FEATURES,
-                 "hidden": hidden, "test_mae": best["test_mae"], "full_mae": full_mae},
+    full_pred_delta = mlp.predict(X)
+    full_pred_3s  = df_aug["heatsink_temp_C"].values + full_pred_delta[:, 0]
+    full_pred_10s = df_aug["heatsink_temp_C"].values + full_pred_delta[:, 1]
+    full_mae_3s  = mean_absolute_error(df_aug["temp_future_3s"].values, full_pred_3s)
+    full_mae_10s = mean_absolute_error(df_aug["temp_future_10s"].values, full_pred_10s)
+    print(f"  Full dataset refit MAE: 3s={full_mae_3s:.4f}C, 10s={full_mae_10s:.4f}C")
+
+    joblib.dump({"model": mlp, "scaler": scaler, "features": FEATURES, "targets": TARGETS,
+                 "hidden": hidden, "test_mae_3s": best["test_mae_3s"], "test_mae_10s": best["test_mae_10s"]},
                 OUTPUT_DIR / "mlp_model_new.joblib")
 
     with open(OUTPUT_DIR / "scaler_params_new.json", "w") as f:
@@ -269,235 +285,81 @@ def train_and_export_best(df: pd.DataFrame, results: list) -> tuple:
 
     metrics = {"best_model": {
         "name": best["architecture"], "hidden_layers": list(hidden),
-        "features": FEATURES,
-        "holdout_test_mae": best["test_mae"], "holdout_test_rmse": best["test_rmse"],
-        "holdout_test_r2": best["test_r2"], "full_dataset_mae": round(full_mae, 4),
+        "features": FEATURES, "targets": TARGETS,
+        "holdout_test_mae_3s": best["test_mae_3s"], "holdout_test_rmse_3s": best["test_rmse_3s"], "holdout_test_r2_3s": best["test_r2_3s"],
+        "holdout_test_mae_10s": best["test_mae_10s"], "holdout_test_rmse_10s": best["test_rmse_10s"], "holdout_test_r2_10s": best["test_r2_10s"],
         "parameters": best["params"], "est_latency_us": best["est_latency_us"],
         "flash_bytes": best["flash_bytes"],
     }}
     with open(OUTPUT_DIR / "metrics_new.json", "w") as f:
         json.dump(metrics, f, indent=2)
 
-    _export_c_code(mlp, scaler, hidden, best)
     return mlp, scaler
-
-
-def _export_c_code(mlp, scaler, hidden, best):
-    coefs      = mlp.coefs_
-    intercepts = mlp.intercepts_
-    layer_sizes = [N_INPUTS] + list(hidden) + [1]
-    n_layers   = len(coefs)
-    max_width  = max(layer_sizes)
-
-    # --- Header ---
-    hdr = (
-        "/*\n"
-        " * mlp_model_new.h -- Auto-generated Stateless 4-Feature Thermal Predictor\n"
-        " *                    for STM32F401RET6 (Cortex-M4 + FPU, 16 MHz HSI)\n"
-        " *\n"
-        f" * Architecture: {' -> '.join(str(s) for s in layer_sizes)}\n"
-        f" * Parameters:   {best['params']} floats ({best['flash_bytes']} bytes Flash)\n"
-        " * Target:        Future heatsink temperature +3s ahead (centi-degC)\n"
-        " *\n"
-        " * Features (ALL stateless -- no elapsed_time counter required):\n"
-        " *   [0] heatsink_temp_C  -- current heatsink temperature\n"
-        " *   [1] ambient_temp_C   -- ambient temperature\n"
-        " *   [2] power_loss_mW    -- regulator power dissipation\n"
-        " *   [3] current_mA       -- regulator output current\n"
-        " *\n"
-        " * WHY NO elapsed_time:\n"
-        " *   The previous 2-input model had no context about WHEN in the heating\n"
-        " *   curve it was. Starting mid-heating caused large prediction errors because\n"
-        " *   the model had only seen training data starting from cold.\n"
-        " *   With power_loss_mW and current_mA as explicit inputs, the model knows\n"
-        " *   the electrical drive state and predicts correctly at ANY thermal state.\n"
-        " *\n"
-        " * Generated by New_models/experiment_mlp_new.py\n"
-        " */\n"
-        "\n"
-        "#ifndef MLP_MODEL_NEW_H\n"
-        "#define MLP_MODEL_NEW_H\n"
-        "\n"
-        "#include <stdint.h>\n"
-        "\n"
-        "/*\n"
-        " * Predict heatsink temperature 3 seconds into the future.\n"
-        " *\n"
-        " * Inputs (centi-units, e.g. 3350 = 33.50):\n"
-        " *   hs_cC     -- current heatsink temperature  (centi-degC)\n"
-        " *   amb_cC    -- ambient temperature            (centi-degC)\n"
-        " *   ploss_cmW -- regulator power dissipation   (centi-mW = mW*100)\n"
-        " *   i_cmA     -- regulator output current      (centi-mA = mA*100)\n"
-        " *\n"
-        " * Returns: predicted future heatsink temperature (+3s) in centi-degC\n"
-        " *\n"
-        " * NOTE: Starting mid-heating is fully supported -- no internal state.\n"
-        " */\n"
-        "int32_t mlp_new_predict_temp_cC(int32_t hs_cC, int32_t amb_cC,\n"
-        "                                int32_t ploss_cmW, int32_t i_cmA);\n"
-        "\n"
-        "#endif /* MLP_MODEL_NEW_H */\n"
-    )
-    with open(OUTPUT_DIR / "mlp_model_new.h", "w", encoding="utf-8") as f:
-        f.write(hdr)
-
-    # --- Source ---
-    lines = [
-        "/*",
-        " * mlp_model_new.c -- Pure-C HW-FPU Stateless Thermal Predictor",
-        " *                    for STM32F401RET6 (Cortex-M4, 16 MHz HSI)",
-        " *",
-        f" * Architecture: {' -> '.join(str(s) for s in layer_sizes)}",
-        f" * Parameters:   {best['params']} floats ({best['flash_bytes']} bytes flash)",
-        " */",
-        "",
-        '#include "mlp_model_new.h"',
-        "#include <stdint.h>",
-        "",
-        "/* StandardScaler parameters (fit on augmented training data) */",
-        f"static const float scaler_mean[{N_INPUTS}] = {{",
-        "    " + ", ".join(f"{v:.8f}f" for v in scaler.mean_),
-        "};",
-        f"static const float scaler_scale[{N_INPUTS}] = {{",
-        "    " + ", ".join(f"{v:.8f}f" for v in scaler.scale_),
-        "};",
-        "",
-    ]
-
-    for i, (W, b) in enumerate(zip(coefs, intercepts)):
-        rows, cols = W.shape
-        flat = W.flatten()
-        lines.append(f"/* Layer {i} weights [{rows} x {cols}] */")
-        lines.append(f"static const float W{i}[{rows * cols}] = {{")
-        for j in range(0, len(flat), 8):
-            chunk = flat[j:j+8]
-            lines.append("    " + ", ".join(f"{v: .8f}f" for v in chunk)
-                         + ("," if j + 8 < len(flat) else ""))
-        lines.append("};")
-        lines.append(f"static const float b{i}[{cols}] = {{")
-        lines.append("    " + ", ".join(f"{v: .8f}f" for v in b))
-        lines.append("};")
-        lines.append("")
-
-    lines += [
-        "int32_t mlp_new_predict_temp_cC(int32_t hs_cC, int32_t amb_cC,",
-        "                                int32_t ploss_cmW, int32_t i_cmA)",
-        "{",
-        "    /* Clamp ambient to realistic range [10 C, 55 C]; default 25 C on fault */",
-        "    if (amb_cC <= 1000 || amb_cC >= 5500) {",
-        "        amb_cC = 2500;",
-        "    }",
-        "",
-        "    /* Normalise inputs: convert centi-units -> physical units, then z-score */",
-        f"    float x[{N_INPUTS}];",
-        "    x[0] = (((float)hs_cC     / 100.0f) - scaler_mean[0]) / scaler_scale[0];",
-        "    x[1] = (((float)amb_cC    / 100.0f) - scaler_mean[1]) / scaler_scale[1];",
-        "    x[2] = (((float)ploss_cmW / 100.0f) - scaler_mean[2]) / scaler_scale[2];",
-        "    x[3] = (((float)i_cmA     / 100.0f) - scaler_mean[3]) / scaler_scale[3];",
-        "",
-        "    /* Forward pass (single-precision HW FPU) */",
-        f"    float buf_a[{max_width}];",
-        f"    float buf_b[{max_width}];",
-        "    const float *in_vec = x;",
-        "    float *out_vec;",
-        "",
-    ]
-
-    for i, (W, b) in enumerate(zip(coefs, intercepts)):
-        rows, cols = W.shape
-        is_last = (i == n_layers - 1)
-        out_buf = "buf_a" if i % 2 == 0 else "buf_b"
-        lines += [
-            f"    /* Layer {i}: {rows} -> {cols} */",
-            f"    out_vec = {out_buf};",
-            f"    for (int j = 0; j < {cols}; j++) {{",
-            f"        float acc = b{i}[j];",
-            f"        for (int k = 0; k < {rows}; k++) {{",
-            f"            acc += in_vec[k] * W{i}[k * {cols} + j];",
-            "        }",
-            "        " + ("out_vec[j] = acc;" if is_last
-                          else "out_vec[j] = (acc > 0.0f) ? acc : 0.0f; /* ReLU */"),
-            "    }",
-            "    in_vec = out_vec;",
-            "",
-        ]
-
-    lines += [
-        "    float delta_C = out_vec[0];",
-        "    int32_t delta_cC = (int32_t)(delta_C * 100.0f + (delta_C >= 0.0f ? 0.5f : -0.5f));",
-        "    return hs_cC + delta_cC;",
-        "}",
-        "",
-    ]
-
-    with open(OUTPUT_DIR / "mlp_model_new.c", "w", encoding="utf-8") as f:
-        f.write("\n".join(lines))
-
-    print(f"  Exported: mlp_model_new.h & mlp_model_new.c")
 
 
 # -----------------------------------------------------------------------
 # 5. PLOT RESULTS
 # -----------------------------------------------------------------------
 def plot_results(results, df_train, df_test, best_mlp, best_scaler):
-    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
-    fig.suptitle(
-        "ThermoGuard NEW MLP -- Stateless 4-Feature Thermal Predictor\n"
-        "Residual Delta-T Learning: Zero Offset Mid-Heat, MAE < 0.15 degC",
-        fontsize=13, fontweight="bold"
-    )
+    fig, axes = plt.subplots(2, 2, figsize=(14, 9))
+    fig.suptitle("ThermoGuard -- Dual-Horizon TinyML Thermal Predictor (3s & 10s)",
+                 fontsize=14, fontweight="bold")
 
-    # Panel 1: MAE by architecture
+    # Panel 1: Bar chart comparing 3s and 10s MAE
     ax = axes[0, 0]
-    srt = sorted(results, key=lambda x: x["test_mae"])
-    names  = [f"{r['architecture']}\n{r['hidden']}" for r in srt]
-    maes   = [r["test_mae"]  for r in srt]
-    colors = ["#2E7D32" if i == 0 else "#1976D2" for i in range(len(names))]
-    ax.barh(range(len(names)), maes, color=colors, edgecolor="white", alpha=0.9)
-    ax.set_yticks(range(len(names)))
-    ax.set_yticklabels(names, fontsize=8)
-    ax.invert_yaxis()
-    ax.set_xlabel("Holdout Test MAE (degC)")
-    ax.set_title("Architecture Accuracy -- 4-feature stateless model")
-    ax.grid(True, alpha=0.3, axis="x")
-
-    # Panel 2: Latency vs MAE
-    ax = axes[0, 1]
-    lats = [r["est_latency_us"] for r in results]
-    mae2 = [r["test_mae"]       for r in results]
-    labs = [r["architecture"]   for r in results]
-    ax.scatter(lats, mae2, c=range(len(results)), cmap="viridis", s=90, zorder=5)
-    for x, y, lbl in zip(lats, mae2, labs):
-        ax.annotate(lbl, (x, y), textcoords="offset points", xytext=(5, 3), fontsize=7)
-    ax.set_xlabel("Estimated Latency (us)")
-    ax.set_ylabel("Holdout Test MAE (degC)")
-    ax.set_title("Edge Efficiency: Latency vs Test MAE")
-    ax.grid(True, alpha=0.3)
-
-    # Panel 3: Actual vs Predicted (best model)
-    ax = axes[1, 0]
-    Xt = best_scaler.transform(df_test[FEATURES].values)
-    yt = df_test["temp_future_3s"].values
-    yp = df_test["heatsink_temp_C"].values + best_mlp.predict(Xt)
-    ax.scatter(yt, yp, alpha=0.3, s=8, c="#1E88E5", edgecolors="none")
-    mn, mx = min(yt.min(), yp.min()), max(yt.max(), yp.max())
-    ax.plot([mn, mx], [mn, mx], "r--", lw=1.5, label="Ideal 1:1")
-    ax.set_xlabel("Actual Future Temp (degC)")
-    ax.set_ylabel("Predicted Future Temp (degC)")
-    ax.set_title(f"Best Model Actual vs Predicted\n"
-                 f"MAE={mean_absolute_error(yt,yp):.3f}  R2={r2_score(yt,yp):.4f}")
+    names = [r["architecture"] for r in results]
+    m3s  = [r["test_mae_3s"] for r in results]
+    m10s = [r["test_mae_10s"] for r in results]
+    x = np.arange(len(names))
+    width = 0.35
+    ax.bar(x - width/2, m3s, width, label="3s Horizon MAE (°C)", color="#1E88E5")
+    ax.bar(x + width/2, m10s, width, label="10s Horizon MAE (°C)", color="#FB8C00")
+    ax.set_xticks(x)
+    ax.set_xticklabels(names)
+    ax.set_ylabel("Holdout Test MAE (°C)")
+    ax.set_title("Test MAE Across Horizons")
     ax.legend(); ax.grid(True, alpha=0.3)
 
-    # Panel 4: Sequential tracking
+    # Panel 2: Latency
+    ax = axes[0, 1]
+    lats = [r["est_latency_us"] for r in results]
+    ax.scatter(lats, m3s, c="#1E88E5", s=90, label="3s MAE", zorder=5)
+    ax.scatter(lats, m10s, c="#FB8C00", s=90, label="10s MAE", zorder=5)
+    ax.set_xlabel("Estimated Latency (µs)")
+    ax.set_ylabel("Holdout Test MAE (°C)")
+    ax.set_title("Edge Efficiency: Latency vs Test MAE")
+    ax.legend(); ax.grid(True, alpha=0.3)
+
+    # Panel 3: Actual vs Predicted 3s & 10s
+    ax = axes[1, 0]
+    Xt = best_scaler.transform(df_test[FEATURES].values)
+    pred_delta = best_mlp.predict(Xt)
+    y_meas = df_test["heatsink_temp_C"].values
+    yp_3s  = y_meas + pred_delta[:, 0]
+    yp_10s = y_meas + pred_delta[:, 1]
+    yt_3s  = df_test["temp_future_3s"].values
+    yt_10s = df_test["temp_future_10s"].values
+
+    ax.scatter(yt_3s, yp_3s, alpha=0.3, s=8, c="#1E88E5", label="3s Lookahead", edgecolors="none")
+    ax.scatter(yt_10s, yp_10s, alpha=0.3, s=8, c="#FB8C00", label="10s Lookahead", edgecolors="none")
+    mn = min(yt_3s.min(), yt_10s.min())
+    mx = max(yt_3s.max(), yt_10s.max())
+    ax.plot([mn, mx], [mn, mx], "r--", lw=1.5, label="Ideal 1:1")
+    ax.set_xlabel("Actual Future Temp (°C)")
+    ax.set_ylabel("Predicted Future Temp (°C)")
+    ax.set_title("Actual vs Predicted")
+    ax.legend(); ax.grid(True, alpha=0.3)
+
+    # Panel 4: Sequential tracking (First 400 Samples)
     ax = axes[1, 1]
-    n = min(400, len(yt))
+    n = min(400, len(yt_3s))
     idx = np.arange(n)
-    ax.plot(idx, yt[:n], label="Actual",    color="#1E88E5", lw=1.5)
-    ax.plot(idx, yp[:n], label="Predicted", color="#FB8C00", lw=1.5, alpha=0.9)
-    ax.fill_between(idx, yt[:n], yp[:n], alpha=0.2, color="#E53935")
+    ax.plot(idx, y_meas[:n], label="Current Heatsink Temp", color="#22D3EE", lw=1.5)
+    ax.plot(idx, yp_3s[:n], label="Pred (+3s)", color="#A3E635", lw=1.5, linestyle="--")
+    ax.plot(idx, yp_10s[:n], label="Pred (+10s)", color="#FB923C", lw=1.5, linestyle=":")
     ax.set_xlabel("Sample Index (unseen future)")
-    ax.set_ylabel("Heatsink Temp (degC)")
-    ax.set_title("Tracking Unseen Future Horizon (First 400 Samples)")
+    ax.set_ylabel("Temperature (°C)")
+    ax.set_title("Sequential Dual-Horizon Tracking")
     ax.legend(); ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
@@ -512,9 +374,9 @@ def plot_results(results, df_train, df_test, best_mlp, best_scaler):
 # -----------------------------------------------------------------------
 def main():
     print("=" * 70)
-    print("  ThermoGuard -- Stateless 4-Feature Thermal Predictor MLP")
+    print("  ThermoGuard -- Dual-Horizon Stateless 4-Feature Thermal Predictor")
     print(f"  Features: {FEATURES}")
-    print("  FIX: Replaced elapsed_time with power+current -- no mid-heat error")
+    print(f"  Targets:  {TARGETS}")
     print("=" * 70)
 
     df = load_and_preprocess()
@@ -525,8 +387,8 @@ def main():
 
     best = sorted(results, key=lambda x: x["test_mae"])[0]
     print("\n" + "=" * 70)
-    print("  [OK] STATELESS 4-FEATURE MODEL COMPLETE!")
-    print(f"  Best: {best['architecture']}  MAE={best['test_mae']:.4f}C  R2={best['test_r2']:.4f}")
+    print("  [OK] DUAL-HORIZON STATELESS MODEL TRAINING COMPLETE!")
+    print(f"  Best: {best['architecture']} | 3s MAE={best['test_mae_3s']:.4f}C | 10s MAE={best['test_mae_10s']:.4f}C")
     print("=" * 70)
     return 0
 
