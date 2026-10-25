@@ -10,6 +10,10 @@
 #include "stm32f401xe.h"
 #include <stdint.h>
 
+#ifndef BENCHMARK_MODE
+#define BENCHMARK_MODE 0
+#endif
+
 #if __has_include("mlp_model.h")
 #include "mlp_model.h"
 #elif __has_include("ml_model/mlp_model.h")
@@ -20,10 +24,6 @@
 #include "mlp_model_new.h"
 #elif __has_include("New_models/mlp_model_new.h")
 #include "New_models/mlp_model_new.h"
-#endif
-
-#ifndef BENCHMARK_MODE
-#define BENCHMARK_MODE 0
 #endif
 
 /* =========================== MODEL SELECTION ============================== */
@@ -136,6 +136,9 @@ static void dwt_init(void)
 /* ============================ CLOCK AND GPIO ============================== */
 static void clock_init(void)
 {
+    /* Enable ART Accelerator: Prefetch Buffer, Instruction Cache, Data Cache */
+    FLASH->ACR |= (FLASH_ACR_PRFTEN | FLASH_ACR_ICEN | FLASH_ACR_DCEN);
+
     RCC->CR |= RCC_CR_HSION;
     while (!(RCC->CR & RCC_CR_HSIRDY)) { }
     RCC->CFGR &= ~(RCC_CFGR_SW | RCC_CFGR_HPRE | RCC_CFGR_PPRE1 | RCC_CFGR_PPRE2);
