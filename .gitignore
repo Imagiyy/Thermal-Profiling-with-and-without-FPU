@@ -34,3 +34,4 @@ logs/
 # Operating system files
 .DS_Store
 Thumbs.db
+build_firmware.sh

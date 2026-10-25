@@ -1,18 +1,17 @@
 /*
- * mlp_model_new.h — Auto-generated TinyML 6-Mode Inference Engine
+ * mlp_model_new.h â€” Auto-generated TinyML 6-Mode Thermal Lookahead Engine
  * Target: STM32 Nucleo-64 F401RE (Cortex-M4, 16 MHz HSI)
+ * Architecture: 4 Inputs -> 16 Neurons (ReLU) -> 1 Output (Linear Delta_T)
+ * Forecast Horizon: +10 Seconds Ahead
  *
  * 6 BENCHMARK CONFIGURATIONS:
  * ------------------------------------------------------------------------------
- * 32-BIT SUITE:
- *   MODE_32BIT_FPU            (0) — 32-bit Float with Hardware FPU (FP32)
- *   MODE_32BIT_FIXED_NORMAL   (1) — 32-bit Int Without FPU: Normal division (/ 10000)
- *   MODE_32BIT_FIXED_POT      (2) — 32-bit Int Without FPU: Power-of-2 bit-shift (>> 16)
- *
- * 16-BIT SUITE (With DSP SIMD & Dynamic Sparsity Optimizations):
- *   MODE_16BIT_FPU            (3) — 16-bit Float with Hardware FPU (FP16 storage / FP32 compute)
- *   MODE_16BIT_FIXED_NORMAL   (4) — 16-bit Int Without FPU: Normal division (/ 2048)
- *   MODE_16BIT_FIXED_POT_SIMD (5) — 16-bit Int Without FPU: PoT shift (>> 11) + ARM SMLAD SIMD Assembly
+ * Mode 0: MODE_32BIT_FPU            (32-bit Float, Hardware FPU)
+ * Mode 1: MODE_32BIT_FIXED_NORMAL   (32-bit Fixed-Point, SDIV Division)
+ * Mode 2: MODE_32BIT_FIXED_POT      (32-bit Fixed-Point, Single-Cycle PoT Shift)
+ * Mode 3: MODE_16BIT_FPU            (16-bit Float in Flash, FP32 in Registers)
+ * Mode 4: MODE_16BIT_FIXED_NORMAL   (16-bit Fixed-Point, Division / 2048)
+ * Mode 5: MODE_16BIT_FIXED_POT_SIMD (16-bit Fixed-Point, PoT + ARM SMLAD SIMD)
  * ------------------------------------------------------------------------------
  */
 
@@ -33,6 +32,18 @@
 #define BENCHMARK_MODE            MODE_32BIT_FPU
 #endif
 
-int32_t mlp_new_predict_temp_cC(int32_t hs_cC, int32_t amb_cC);
+/*
+ * TinyML Thermal Lookahead Inference Entrypoint
+ *
+ * Inputs:
+ *   ploss_cmW â€” Power dissipation in centi-mW (100 = 1 mW)
+ *   i_cmA     â€” Regulator input current in centi-mA (100 = 1 mA)
+ *   amb_cC    â€” Ambient temperature in centi-Â°C (100 = 1 Â°C)
+ *   hs_cC     â€” Current heatsink temperature in centi-Â°C (100 = 1 Â°C)
+ *
+ * Returns:
+ *   Predicted heatsink temperature 10s ahead in centi-Â°C
+ */
+int32_t mlp_new_predict_temp_cC(int32_t ploss_cmW, int32_t i_cmA, int32_t amb_cC, int32_t hs_cC);
 
 #endif /* MLP_MODEL_NEW_H */
