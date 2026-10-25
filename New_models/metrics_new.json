@@ -10,10 +10,10 @@
       "power_loss_mW",
       "current_mA"
     ],
-    "holdout_test_mae": 0.2377,
-    "holdout_test_rmse": 0.3062,
-    "holdout_test_r2": 0.9995,
-    "full_dataset_mae": 0.1514,
+    "holdout_test_mae": 0.1245,
+    "holdout_test_rmse": 0.1902,
+    "holdout_test_r2": 0.9998,
+    "full_dataset_mae": 0.1156,
     "parameters": 193,
     "est_latency_us": 60.0,
     "flash_bytes": 772

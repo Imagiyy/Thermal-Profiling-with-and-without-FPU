@@ -277,7 +277,8 @@ int32_t mlp_new_predict_mode0_fp32(int32_t hs_cC, int32_t amb_cC,
         }}
     }}
 
-    return (int32_t)(out * 100.0f + (out >= 0.0f ? 0.5f : -0.5f));
+    int32_t delta_cC = (int32_t)(out * 100.0f + (out >= 0.0f ? 0.5f : -0.5f));
+    return hs_cC + delta_cC;
 }}
 
 /* ==============================================================================
@@ -329,7 +330,8 @@ int32_t mlp_new_predict_mode1_int32_norm(int32_t hs_cC, int32_t amb_cC,
     }}
     out_acc /= SCALE_NORMAL_32;
 
-    return (int32_t)(((int64_t)out_acc * 100LL) / SCALE_NORMAL_32);
+    int32_t delta_cC = (int32_t)(((int64_t)out_acc * 100LL) / SCALE_NORMAL_32);
+    return hs_cC + delta_cC;
 }}
 
 /* ==============================================================================
@@ -381,7 +383,8 @@ int32_t mlp_new_predict_mode2_int32_pot(int32_t hs_cC, int32_t amb_cC,
     }}
     out_acc >>= SHIFT_POT_32;
 
-    return (int32_t)(((int64_t)out_acc * 100LL) >> SHIFT_POT_32);
+    int32_t delta_cC = (int32_t)(((int64_t)out_acc * 100LL) >> SHIFT_POT_32);
+    return hs_cC + delta_cC;
 }}
 
 /* ==============================================================================
@@ -423,7 +426,8 @@ int32_t mlp_new_predict_mode3_fp16(int32_t hs_cC, int32_t amb_cC,
         }}
     }}
 
-    return (int32_t)(out * 100.0f + (out >= 0.0f ? 0.5f : -0.5f));
+    int32_t delta_cC = (int32_t)(out * 100.0f + (out >= 0.0f ? 0.5f : -0.5f));
+    return hs_cC + delta_cC;
 }}
 
 /* ==============================================================================
@@ -472,7 +476,8 @@ int32_t mlp_new_predict_mode4_int16_norm(int32_t hs_cC, int32_t amb_cC,
     }}
     out_acc /= SCALE_NORMAL_16;
 
-    return (int32_t)(((int64_t)out_acc * 100LL) / SCALE_NORMAL_16);
+    int32_t delta_cC = (int32_t)(((int64_t)out_acc * 100LL) / SCALE_NORMAL_16);
+    return hs_cC + delta_cC;
 }}
 
 /* ==============================================================================
@@ -531,7 +536,8 @@ int32_t mlp_new_predict_mode5_int16_simd(int32_t hs_cC, int32_t amb_cC,
     }}
     out_acc >>= SHIFT_POT_16;
 
-    return (int32_t)(((int64_t)out_acc * 100LL) >> SHIFT_POT_16);
+    int32_t delta_cC = (int32_t)(((int64_t)out_acc * 100LL) >> SHIFT_POT_16);
+    return hs_cC + delta_cC;
 }}
 
 /* ==============================================================================

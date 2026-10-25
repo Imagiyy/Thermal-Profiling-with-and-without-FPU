@@ -770,20 +770,17 @@ int main(void)
             ploss_cmW = 0;
             mlp_reset_timebase();
 
-            /* Newton's Law of Passive Cooling:
-             * Tau = 208 s (measured from heatsink dataset), dt = 0.5 s
-             * Alpha_Q15 = round(exp(-0.5 / 208.0) * 32768) = 32689 */
-            if (s_pred_cC == 0) {
-                s_pred_cC = (hs_cC > amb_cC) ? hs_cC : amb_cC; /* Initialize to actual heatsink temp if hot at boot */
-            }
-            int32_t delta = s_pred_cC - amb_cC;
+            /* Newton's Law of Passive Cooling forecast (+1s ahead):
+             * Tau = 208 s (measured from heatsink dataset), dt = 1.0 s
+             * Alpha_Q15 = round(exp(-1.0 / 208.0) * 32768) = 32610 */
+            int32_t delta = hs_cC - amb_cC;
             if (delta > 0) {
-                delta = (int32_t)(((int64_t)delta * 32689LL) >> 15);
-                s_pred_cC = amb_cC + delta;
+                delta = (int32_t)(((int64_t)delta * 32610LL) >> 15);
+                pred_cC = amb_cC + delta;
             } else {
-                s_pred_cC = amb_cC;
+                pred_cC = hs_cC;
             }
-            pred_cC = s_pred_cC;
+            s_pred_cC = pred_cC;
             infer_us = 1U;
         } else {
             if (!(fault & (F_INA219 | F_ADC))) {
