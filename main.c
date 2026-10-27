@@ -646,16 +646,6 @@ static int adc1_read_vout_mV(int32_t *vout_mV)
 /* ==================================== MAIN ================================ */
 int main(void)
 {
-#if (defined(BENCHMARK_MODE) && (BENCHMARK_MODE == 0 || BENCHMARK_MODE == 3))
-    /* Hardware FPU enabled: Grant CP10 & CP11 Full Access */
-    SCB->CPACR |= ((3UL << 20) | (3UL << 22));
-#else
-    /* Hardware FPU physically disabled in silicon: Clear CP10 & CP11 coprocessor access */
-    SCB->CPACR &= ~((3UL << 20) | (3UL << 22));
-#endif
-    __DSB();
-    __ISB();
-
     clock_init();
     gpio_init();
     timer5_init();
@@ -755,24 +745,7 @@ int main(void)
             }
         }
 
-        /* Automated thermal cutoff protection:
-         * Disconnects power source when heatsink temperature reaches >= 90.0 °C.
-         * Reconnects when cooled down below 80.0 °C (hysteresis). */
-        static uint8_t s_thermal_tripped = 0U;
 
-        if (hs_cC >= THERMAL_SHUTDOWN_THRESHOLD) {
-            if (!s_thermal_tripped) {
-                s_thermal_tripped = 1U;
-                mosfet_power_off();
-            }
-        } else if (s_thermal_tripped && (hs_cC < THERMAL_RECOVERY_THRESHOLD)) {
-            s_thermal_tripped = 0U;
-            mosfet_power_on();
-        }
-
-        if (s_thermal_tripped) {
-            fault |= F_THERMAL_TRIP;
-        }
 
         /* Threshold Rule: If Vin < 8500 mV (8.5 V), regulator is unpowered -> COOLING PHASE
          * (KA7808 requires Vin >= 9.5 V to regulate 8.0 V; avoids 30s cap discharge noise)
@@ -869,6 +842,31 @@ int main(void)
                 if (s_pred_10s_glitch_cnt <= 2) pred_10s_cC = s_clean_pred_10s_cC;
                 else { s_clean_pred_10s_cC = pred_10s_cC; s_pred_10s_glitch_cnt = 0; }
             } else { s_clean_pred_10s_cC = pred_10s_cC; s_pred_10s_glitch_cnt = 0; }
+        }
+
+        /* Automated predictive thermal cutoff protection:
+         * Proactively disconnects power source when either 3s or 10s predicted temperature
+         * reaches >= 90.0 °C (with measured heatsink temp retained as fail-safe).
+         * Reconnects when cooled down below 80.0 °C (hysteresis). */
+        static uint8_t s_thermal_tripped = 0U;
+
+        if (pred_3s_cC >= THERMAL_SHUTDOWN_THRESHOLD ||
+            pred_10s_cC >= THERMAL_SHUTDOWN_THRESHOLD ||
+            hs_cC >= THERMAL_SHUTDOWN_THRESHOLD) {
+            if (!s_thermal_tripped) {
+                s_thermal_tripped = 1U;
+                mosfet_power_off();
+            }
+        } else if (s_thermal_tripped &&
+                   (hs_cC < THERMAL_RECOVERY_THRESHOLD) &&
+                   (pred_3s_cC < THERMAL_RECOVERY_THRESHOLD) &&
+                   (pred_10s_cC < THERMAL_RECOVERY_THRESHOLD)) {
+            s_thermal_tripped = 0U;
+            mosfet_power_on();
+        }
+
+        if (s_thermal_tripped) {
+            fault |= F_THERMAL_TRIP;
         }
 
         /* Build and send the CSV line (11 fields) */
