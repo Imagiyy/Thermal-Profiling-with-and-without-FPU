@@ -1373,7 +1373,7 @@ function trimChart(chart, latestTs) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const T_MIN = 0;
-const T_WARN = 70;
+const T_WARN = 80;
 const T_CUTOFF = 80;
 const T_MAX = 100;
 
@@ -1402,19 +1402,19 @@ function updateThermalZone(tempC) {
     kpiTempVal.className = "text-xl font-bold text-rose-600 dark:text-rose-400 tabular-nums";
     startAlarm();
   } else if (tempC >= T_WARN) {
-    // ELEVATED / WARNING (70°C - 80°C) — Amber glow
+    // ELEVATED / WARNING (≥80°C) — Amber glow
     kpiThermal.classList.remove("glow-red");
     kpiThermal.classList.add("glow-amber");
     thermalDot.className = "w-2.5 h-2.5 rounded-full bg-amber-500";
-    thermalLabel.textContent = "WARNING (≥70°C)";
+    thermalLabel.textContent = "WARNING (≥80°C)";
     thermalLabel.className = "text-[10px] font-semibold text-amber-600 dark:text-amber-400";
     kpiTempVal.className = "text-xl font-bold text-amber-600 dark:text-amber-400 tabular-nums";
     stopAlarm();
   } else {
-    // NOMINAL SAFE (< 70°C) — Green
+    // NOMINAL SAFE (< 80°C) — Green
     kpiThermal.classList.remove("glow-red", "glow-amber");
     thermalDot.className = "w-2.5 h-2.5 rounded-full bg-emerald-500";
-    thermalLabel.textContent = "SAFE (<70°C)";
+    thermalLabel.textContent = "SAFE (<80°C)";
     thermalLabel.className = "text-[10px] font-semibold text-emerald-600 dark:text-emerald-400";
     kpiTempVal.className = "text-xl font-bold text-emerald-600 dark:text-emerald-400 tabular-nums";
     stopAlarm();
