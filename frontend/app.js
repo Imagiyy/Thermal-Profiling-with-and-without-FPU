@@ -6,7 +6,7 @@
  *  - REST calls for port scanning, connect/disconnect, recording
  *  - Chart.js thermal & electrical chart rendering with 120 s rolling window
  *  - Live KPI badge updates (tracking error, MAE, RMSE, RθJA)
- *  - Safety zone indicators with audible alarm at >70°C
+ *  - Safety zone indicators with audible alarm at cutoff (>=80°C, scale max 100°C)
  *  - MAX31855 fault decoding visualization
  */
 
@@ -21,31 +21,84 @@ const API    = `${location.origin}/api`;
 const WINDOW_SEC          = 120;            // default rolling chart window (120 s)
 const BUFFER_RETENTION_MS = 600 * 1000;     // retain up to 10 minutes (600 s) in memory for zoom/pan
 const MAX_POINTS          = 1500;           // maximum buffer headroom (12.5 mins at 500ms intervals)
-const CHART_COLORS = {
-  measured : "rgb(34,211,238)",     // cyan
-  pred3s   : "rgb(163,230,53)",     // lime
-  pred10s  : "rgb(251,146,60)",     // orange / amber
-  ambient  : "rgba(148,163,184,.6)",// slate-400
-  vdrop    : "rgb(251,191,36)",     // amber
-  current  : "rgb(96,165,250)",     // blue-400
-  power    : "rgb(251,113,133)",    // rose-400
-};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// THEME & PALETTES (Default: White Background)
+// ═══════════════════════════════════════════════════════════════════════════
+const THEME_KEY = "thermoguard_theme";
+let isDarkMode = false; // Default: White Background!
+
+function getThemeColors(dark) {
+  if (dark) {
+    return {
+      grid: "rgba(255,255,255,.05)",
+      tick: "rgba(148,163,184,.6)",
+      tooltipBg: "rgba(13,15,18,.92)",
+      tooltipTitle: "#e2e8f0",
+      tooltipBody: "#cbd5e1",
+      tooltipBorder: "rgba(255,255,255,.1)",
+      measured: "rgb(34,211,238)",     // cyan-400
+      pred3s:   "rgb(163,230,53)",     // lime-400
+      pred10s:  "rgb(251,146,60)",     // orange-400
+      ambient:  "rgba(148,163,184,.6)",// slate-400
+      vdrop:    "rgb(251,191,36)",     // amber-400
+      current:  "rgb(96,165,250)",     // blue-400
+      power:    "rgb(251,113,133)",    // rose-400
+      fillMeas: "rgba(34,211,238,.08)",
+      fill3s:   "rgba(163,230,53,.08)",
+      fill10s:  "rgba(251,146,60,.08)",
+      fillAmb:  "rgba(148,163,184,.04)",
+      cutoff:   "rgba(244,63,94,0.85)",
+    };
+  } else {
+    // Light mode (default white background) — rich high-contrast palette
+    return {
+      grid: "rgba(0,0,0,.08)",
+      tick: "rgba(71,85,105,.9)",      // slate-600
+      tooltipBg: "rgba(255,255,255,.98)",
+      tooltipTitle: "#0f172a",          // slate-900
+      tooltipBody: "#334155",           // slate-700
+      tooltipBorder: "rgba(0,0,0,.12)",
+      measured: "rgb(8,145,178)",       // cyan-600
+      pred3s:   "rgb(101,163,13)",      // lime-600
+      pred10s:  "rgb(234,88,12)",       // orange-600
+      ambient:  "rgba(100,116,139,.8)", // slate-500
+      vdrop:    "rgb(217,119,6)",       // amber-600
+      current:  "rgb(37,99,235)",       // blue-600
+      power:    "rgb(225,29,72)",       // rose-600
+      fillMeas: "rgba(8,145,178,.08)",
+      fill3s:   "rgba(101,163,13,.08)",
+      fill10s:  "rgba(234,88,12,.08)",
+      fillAmb:  "rgba(100,116,139,.06)",
+      cutoff:   "rgba(225,29,72,0.9)",
+    };
+  }
+}
+
+let activeColors = getThemeColors(false);
+
+const CHART_COLORS = new Proxy({}, {
+  get: (_, prop) => activeColors[prop] || "#888",
+});
 
 // ═══════════════════════════════════════════════════════════════════════════
 // DOM REFS
 // ═══════════════════════════════════════════════════════════════════════════
 const $  = (id) => document.getElementById(id);
 
-const portSelect   = $("port-select");
-const baudSelect   = $("baud-select");
-const btnRefresh   = $("btn-refresh-ports");
-const btnConnect   = $("btn-connect");
-const btnDisconnect= $("btn-disconnect");
-const connDot      = $("conn-dot");
-const connLabel    = $("conn-label");
+const portSelect          = $("port-select");
+const baudSelect          = $("baud-select");
+const btnRefresh          = $("btn-refresh-ports");
+const btnConnect          = $("btn-connect");
+const btnDisconnect       = $("btn-disconnect");
+const connDot             = $("conn-dot");
+const connLabel           = $("conn-label");
 
-const btnResetPage = $("btn-reset-page");
-const btnExportCsv = $("btn-export-csv");
+const btnThemeToggle      = $("btn-theme-toggle");
+const btnExportThermalPng = $("btn-export-thermal-png");
+const btnExportElecPng    = $("btn-export-elec-png");
+const btnResetPage        = $("btn-reset-page");
+const btnExportCsv        = $("btn-export-csv");
 
 const kpiErrorVal   = $("kpi-error-val");
 const kpiAmbTempVal = $("kpi-amb-temp-val");
@@ -113,8 +166,8 @@ let alarmOsc    = null;
 // CHARTS
 // ═══════════════════════════════════════════════════════════════════════════
 
-const chartGridColor  = "rgba(255,255,255,.04)";
-const chartTickColor  = "rgba(148,163,184,.5)";
+let chartGridColor  = activeColors.grid;
+let chartTickColor  = activeColors.tick;
 
 let currentLatestTs = 0;
 
@@ -142,6 +195,7 @@ function createZoomConfig() {
             chart._isZoomed = true;
             chart._isPannedBack = false;
             updateZoomLabel(chart);
+            if (chart === thermalChart && typeof updateThermalYAutoZoom === "function") updateThermalYAutoZoom(chart);
           }
         }
       },
@@ -153,6 +207,7 @@ function createZoomConfig() {
             chart._isZoomed = true;
             chart._isPannedBack = false;
             updateZoomLabel(chart);
+            if (chart === thermalChart && typeof updateThermalYAutoZoom === "function") updateThermalYAutoZoom(chart);
           }
         }
       },
@@ -168,6 +223,7 @@ function createZoomConfig() {
           if (!chart._isPannedBack) {
             chart._userSpan = chart.scales.x.max - chart.scales.x.min;
             updateZoomLabel(chart);
+            if (chart === thermalChart && typeof updateThermalYAutoZoom === "function") updateThermalYAutoZoom(chart);
           }
         }
       },
@@ -179,6 +235,7 @@ function createZoomConfig() {
           if (!chart._isPannedBack) {
             chart._userSpan = chart.scales.x.max - chart.scales.x.min;
             updateZoomLabel(chart);
+            if (chart === thermalChart && typeof updateThermalYAutoZoom === "function") updateThermalYAutoZoom(chart);
           }
         }
       },
@@ -188,6 +245,35 @@ function createZoomConfig() {
     },
   };
 }
+
+// Plugin to draw horizontal cutoff indicator line on thermal chart at 80°C
+const thermalCutoffLinePlugin = {
+  id: "thermalCutoffLine",
+  afterDraw(chart) {
+    if (chart.canvas.id !== "chart-thermal") return;
+    const yAxis = chart.scales.y;
+    const xAxis = chart.scales.x;
+    if (!yAxis || !xAxis) return;
+    const yPos = yAxis.getPixelForValue(80);
+    if (yPos < yAxis.top || yPos > yAxis.bottom) return;
+
+    const ctx = chart.ctx;
+    ctx.save();
+    ctx.strokeStyle = activeColors.cutoff;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([5, 4]);
+    ctx.beginPath();
+    ctx.moveTo(xAxis.left, yPos);
+    ctx.lineTo(xAxis.right, yPos);
+    ctx.stroke();
+
+    ctx.fillStyle = activeColors.cutoff;
+    ctx.font = "bold 9px monospace, sans-serif";
+    ctx.textAlign = "right";
+    ctx.fillText("CUTOFF 80°C", xAxis.right - 6, yPos - 4);
+    ctx.restore();
+  },
+};
 
 // -- Thermal Chart --
 const thermalCtx = $("chart-thermal").getContext("2d");
@@ -258,23 +344,15 @@ const thermalChart = new Chart(thermalCtx, {
         title: { display: true, text: "Temperature (°C)", color: chartTickColor, font: { size: 10 } },
         ticks: { color: chartTickColor, font: { size: 9 } },
         grid: { color: chartGridColor },
-        grace: "8%",
       },
     },
     plugins: {
       legend: { labels: { color: chartTickColor, font: { size: 10 }, boxWidth: 14, padding: 12 } },
       zoom: createZoomConfig(),
-      tooltip: {
-        backgroundColor: "rgba(13,15,18,.9)",
-        titleColor: "#e2e8f0",
-        bodyColor: "#cbd5e1",
-        borderColor: "rgba(255,255,255,.08)",
-        borderWidth: 1,
-        cornerRadius: 8,
-        padding: 10,
-      },
+      tooltip: { enabled: false },
     },
   },
+  plugins: [thermalCutoffLinePlugin],
 });
 
 // -- Electrical Chart --
@@ -351,18 +429,340 @@ const elecChart = new Chart(elecCtx, {
     plugins: {
       legend: { labels: { color: chartTickColor, font: { size: 10 }, boxWidth: 14, padding: 12 } },
       zoom: createZoomConfig(),
-      tooltip: {
-        backgroundColor: "rgba(13,15,18,.9)",
-        titleColor: "#e2e8f0",
-        bodyColor: "#cbd5e1",
-        borderColor: "rgba(255,255,255,.08)",
-        borderWidth: 1,
-        cornerRadius: 8,
-        padding: 10,
-      },
+      tooltip: { enabled: false },
     },
   },
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STATIONARY CURSOR TOOLTIP
+// Values remain completely STILL at cursor while graph scrolls;
+// changes ONLY when user moves cursor to another point.
+// ═══════════════════════════════════════════════════════════════════════════
+
+function findClosestPointIndex(arr, targetX) {
+  if (!arr || arr.length === 0) return -1;
+  let low = 0;
+  let high = arr.length - 1;
+  while (low <= high) {
+    const mid = (low + high) >> 1;
+    const midX = arr[mid]?.x;
+    if (midX === undefined) return -1;
+    if (midX === targetX) return mid;
+    if (midX < targetX) low = mid + 1;
+    else high = mid - 1;
+  }
+  if (low >= arr.length) return arr.length - 1;
+  if (high < 0) return 0;
+  const dLow = Math.abs(arr[low].x - targetX);
+  const dHigh = Math.abs(arr[high].x - targetX);
+  return dLow < dHigh ? low : high;
+}
+
+function attachStationaryCursorTooltip(chart, canvasId, tooltipId, crosshairId, type) {
+  const canvas = $(canvasId);
+  const tooltip = $(tooltipId);
+  const crosshair = $(crosshairId);
+  if (!canvas || !tooltip || !crosshair) return;
+
+  let isHovering = false;
+  let lastClientX = 0;
+  let lastClientY = 0;
+
+  function updateTooltip(clientX, clientY) {
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = clientX - rect.left;
+    const mouseY = clientY - rect.top;
+
+    const xAxis = chart.scales.x;
+    const yAxis = chart.scales.y || chart.scales.yV;
+    if (!xAxis || !yAxis) {
+      hide();
+      return;
+    }
+
+    // Must be inside the active chart area
+    if (mouseX < xAxis.left || mouseX > xAxis.right || mouseY < yAxis.top || mouseY > yAxis.bottom) {
+      hide();
+      return;
+    }
+
+    const hoveredTime = xAxis.getValueForPixel(mouseX);
+    const d0 = chart.data.datasets[0]?.data;
+    if (!d0 || d0.length === 0) {
+      hide();
+      return;
+    }
+
+    const idx = findClosestPointIndex(d0, hoveredTime);
+    if (idx === -1 || !d0[idx]) {
+      hide();
+      return;
+    }
+
+    const ptTime = d0[idx].x;
+    const timeSec = (ptTime / 1000).toFixed(1);
+
+    let html = `
+      <div class="flex items-center justify-between gap-3 border-b border-slate-200 dark:border-white/10 pb-1 mb-1.5">
+        <span class="font-semibold text-slate-500 dark:text-gray-400 font-mono text-[10px]">TIME</span>
+        <span class="font-mono font-bold text-slate-900 dark:text-white text-xs">${timeSec}s</span>
+      </div>
+      <div class="space-y-1">
+    `;
+
+    if (type === "thermal") {
+      const tMeas = chart.data.datasets[0]?.data[idx]?.y;
+      const t3s   = chart.data.datasets[1]?.data[idx]?.y;
+      const t10s  = chart.data.datasets[2]?.data[idx]?.y;
+      const tAmb  = chart.data.datasets[3]?.data[idx]?.y;
+
+      html += `
+        <div class="flex items-center justify-between gap-4">
+          <div class="flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full shadow-sm" style="background:${activeColors.measured}"></span>
+            <span class="text-slate-600 dark:text-gray-300">Heatsink</span>
+          </div>
+          <span class="font-mono font-bold text-slate-800 dark:text-gray-100">${tMeas !== undefined ? tMeas.toFixed(1) + "°C" : "—"}</span>
+        </div>
+        <div class="flex items-center justify-between gap-4">
+          <div class="flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full shadow-sm" style="background:${activeColors.pred3s}"></span>
+            <span class="text-slate-600 dark:text-gray-300">Pred (+3s)</span>
+          </div>
+          <span class="font-mono font-bold text-slate-800 dark:text-gray-100">${t3s !== undefined ? t3s.toFixed(1) + "°C" : "—"}</span>
+        </div>
+        <div class="flex items-center justify-between gap-4">
+          <div class="flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full shadow-sm" style="background:${activeColors.pred10s}"></span>
+            <span class="text-slate-600 dark:text-gray-300">Pred (+10s)</span>
+          </div>
+          <span class="font-mono font-bold text-slate-800 dark:text-gray-100">${t10s !== undefined ? t10s.toFixed(1) + "°C" : "—"}</span>
+        </div>
+        <div class="flex items-center justify-between gap-4">
+          <div class="flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full shadow-sm" style="background:${activeColors.ambient}"></span>
+            <span class="text-slate-500 dark:text-gray-400">Ambient</span>
+          </div>
+          <span class="font-mono font-medium text-slate-600 dark:text-gray-300">${tAmb !== undefined ? tAmb.toFixed(1) + "°C" : "—"}</span>
+        </div>
+      `;
+    } else {
+      const vDrop = chart.data.datasets[0]?.data[idx]?.y;
+      const iLoad = chart.data.datasets[1]?.data[idx]?.y;
+      const pDiss = chart.data.datasets[2]?.data[idx]?.y;
+
+      html += `
+        <div class="flex items-center justify-between gap-4">
+          <div class="flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full shadow-sm" style="background:${activeColors.vdrop}"></span>
+            <span class="text-slate-600 dark:text-gray-300">V drop</span>
+          </div>
+          <span class="font-mono font-bold text-slate-800 dark:text-gray-100">${vDrop !== undefined ? vDrop.toFixed(2) + " V" : "—"}</span>
+        </div>
+        <div class="flex items-center justify-between gap-4">
+          <div class="flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full shadow-sm" style="background:${activeColors.current}"></span>
+            <span class="text-slate-600 dark:text-gray-300">I load</span>
+          </div>
+          <span class="font-mono font-bold text-slate-800 dark:text-gray-100">${iLoad !== undefined ? iLoad.toFixed(1) + " mA" : "—"}</span>
+        </div>
+        <div class="flex items-center justify-between gap-4">
+          <div class="flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full shadow-sm" style="background:${activeColors.power}"></span>
+            <span class="text-slate-600 dark:text-gray-300">P diss</span>
+          </div>
+          <span class="font-mono font-bold text-slate-800 dark:text-gray-100">${pDiss !== undefined ? pDiss.toFixed(1) + " mW" : "—"}</span>
+        </div>
+      `;
+    }
+
+    html += `</div>`;
+    tooltip.innerHTML = html;
+
+    // Show and position crosshair
+    crosshair.style.left = mouseX + "px";
+    crosshair.style.top = yAxis.top + "px";
+    crosshair.style.height = (yAxis.bottom - yAxis.top) + "px";
+    crosshair.style.display = "block";
+
+    // Show and position tooltip
+    tooltip.style.display = "block";
+    const tipWidth = tooltip.offsetWidth || 180;
+    const tipHeight = tooltip.offsetHeight || 130;
+
+    let left = mouseX + 16;
+    let top = mouseY - 20;
+
+    if (left + tipWidth > rect.width - 12) {
+      left = mouseX - tipWidth - 16;
+    }
+    if (left < 10) left = 10;
+
+    if (top + tipHeight > rect.height - 10) {
+      top = rect.height - tipHeight - 10;
+    }
+    if (top < yAxis.top) top = yAxis.top;
+
+    tooltip.style.left = left + "px";
+    tooltip.style.top = top + "px";
+  }
+
+  function hide() {
+    isHovering = false;
+    tooltip.style.display = "none";
+    crosshair.style.display = "none";
+  }
+
+  // Mousemove: updates values ONLY when cursor moves to a new point
+  canvas.addEventListener("mousemove", (e) => {
+    isHovering = true;
+    lastClientX = e.clientX;
+    lastClientY = e.clientY;
+    updateTooltip(lastClientX, lastClientY);
+  });
+
+  canvas.addEventListener("mouseleave", hide);
+
+  canvas.addEventListener("wheel", () => {
+    if (isHovering) {
+      requestAnimationFrame(() => updateTooltip(lastClientX, lastClientY));
+    }
+  }, { passive: true });
+
+  canvas.addEventListener("touchstart", (e) => {
+    if (e.touches && e.touches[0]) {
+      isHovering = true;
+      lastClientX = e.touches[0].clientX;
+      lastClientY = e.touches[0].clientY;
+      updateTooltip(lastClientX, lastClientY);
+    }
+  }, { passive: true });
+
+  canvas.addEventListener("touchmove", (e) => {
+    if (e.touches && e.touches[0]) {
+      isHovering = true;
+      lastClientX = e.touches[0].clientX;
+      lastClientY = e.touches[0].clientY;
+      updateTooltip(lastClientX, lastClientY);
+    }
+  }, { passive: true });
+
+  canvas.addEventListener("touchend", hide);
+}
+
+// Initialize stationary tooltips on both charts
+attachStationaryCursorTooltip(thermalChart, "chart-thermal", "thermal-tooltip", "thermal-crosshair", "thermal");
+attachStationaryCursorTooltip(elecChart, "chart-electrical", "elec-tooltip", "elec-crosshair", "elec");
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DYNAMIC Y-AXIS ZOOM FOR THERMAL CHART
+// Auto-scales Y-axis tightly around active temperatures so errors and dynamics
+// are clearly visible instead of squashed on a static 0-100°C scale.
+// ═══════════════════════════════════════════════════════════════════════════
+
+let isThermalAutoY = true;
+let currentThermalYMin = null;
+let currentThermalYMax = null;
+
+const btnToggleThermalAutoY = $("btn-toggle-thermal-autoy");
+const autoyDot = $("autoy-dot");
+const autoyLabel = $("autoy-label");
+const thermalYBadge = $("thermal-y-badge");
+
+function updateThermalYAutoZoom(chart) {
+  if (!isThermalAutoY) return;
+  if (!chart || !chart.data || !chart.data.datasets) return;
+
+  const xAxis = chart.scales.x;
+  const xMin = (xAxis && !isNaN(xAxis.min)) ? xAxis.min : (chart.options.scales.x.min || 0);
+  const xMax = (xAxis && !isNaN(xAxis.max)) ? xAxis.max : (chart.options.scales.x.max || Infinity);
+
+  let minVal = Infinity;
+  let maxVal = -Infinity;
+  let count = 0;
+
+  // Inspect visible datasets (Heatsink, Pred +3s, Pred +10s, Ambient if visible)
+  chart.data.datasets.forEach((ds, dsIdx) => {
+    if (chart.isDatasetVisible && !chart.isDatasetVisible(dsIdx)) return;
+    if (!ds.data || ds.data.length === 0) return;
+
+    for (let i = ds.data.length - 1; i >= 0; i--) {
+      const pt = ds.data[i];
+      if (!pt || pt.y === undefined || pt.y === null || isNaN(pt.y)) continue;
+
+      if (pt.x !== undefined) {
+        if (pt.x < xMin) {
+          // Include boundary point for continuity, then stop looking backwards
+          if (pt.y < minVal) minVal = pt.y;
+          if (pt.y > maxVal) maxVal = pt.y;
+          count++;
+          break;
+        }
+        if (pt.x > xMax) continue;
+      }
+
+      if (pt.y < minVal) minVal = pt.y;
+      if (pt.y > maxVal) maxVal = pt.y;
+      count++;
+    }
+  });
+
+  if (count === 0 || !isFinite(minVal) || !isFinite(maxVal)) return;
+
+  // Ensure minimum range of 3.0°C so micro noise doesn't over-magnify
+  const rawSpan = maxVal - minVal;
+  const effectiveSpan = Math.max(3.0, rawSpan);
+  const center = (minVal + maxVal) / 2;
+
+  // Add 18% headroom above and below
+  const padding = effectiveSpan * 0.18;
+  const targetMin = Math.floor(center - (effectiveSpan / 2) - padding);
+  const targetMax = Math.ceil(center + (effectiveSpan / 2) + padding);
+
+  // Smooth filter
+  if (currentThermalYMin === null) {
+    currentThermalYMin = targetMin;
+    currentThermalYMax = targetMax;
+  } else {
+    currentThermalYMin += (targetMin - currentThermalYMin) * 0.35;
+    currentThermalYMax += (targetMax - currentThermalYMax) * 0.35;
+  }
+
+  const finalMin = Math.floor(currentThermalYMin);
+  const finalMax = Math.ceil(currentThermalYMax);
+
+  chart.options.scales.y.min = finalMin;
+  chart.options.scales.y.max = finalMax;
+
+  if (thermalYBadge && isThermalAutoY) {
+    thermalYBadge.textContent = `${finalMin}–${finalMax}°C (Auto Y)`;
+  }
+}
+
+function setThermalAutoY(enable) {
+  isThermalAutoY = enable;
+  if (isThermalAutoY) {
+    if (autoyDot) autoyDot.className = "w-1.5 h-1.5 rounded-full bg-emerald-500";
+    if (autoyLabel) autoyLabel.textContent = "Auto Y";
+    if (thermalYBadge) {
+      thermalYBadge.className = "ml-1 px-1.5 py-0.5 rounded text-[9px] font-mono bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60 font-semibold";
+    }
+    currentThermalYMin = null;
+    currentThermalYMax = null;
+    updateThermalYAutoZoom(thermalChart);
+  } else {
+    if (autoyDot) autoyDot.className = "w-1.5 h-1.5 rounded-full bg-slate-400";
+    if (autoyLabel) autoyLabel.textContent = "0–100°C";
+    if (thermalYBadge) {
+      thermalYBadge.textContent = "0–100°C";
+      thermalYBadge.className = "ml-1 px-1.5 py-0.5 rounded text-[9px] font-mono bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700";
+    }
+    thermalChart.options.scales.y.min = 0;
+    thermalChart.options.scales.y.max = 100;
+  }
+  thermalChart.update("none");
+}
 
 function zoomChartByFactor(chart, factor) {
   const currentSpan = chart._userSpan || (WINDOW_SEC * 1000);
@@ -377,6 +777,7 @@ function zoomChartByFactor(chart, factor) {
     chart.options.scales.x.min = latest - newSpan;
   }
   updateZoomLabel(chart);
+  if (chart === thermalChart) updateThermalYAutoZoom(chart);
   chart.update("none");
 }
 
@@ -393,6 +794,7 @@ function resetChartZoom(chart) {
     delete chart.options.scales.x.max;
   }
   updateZoomLabel(chart);
+  if (chart === thermalChart) updateThermalYAutoZoom(chart);
   chart.update("none");
 }
 
@@ -400,9 +802,230 @@ $("btn-thermal-zoom-in").addEventListener("click", () => zoomChartByFactor(therm
 $("btn-thermal-zoom-out").addEventListener("click", () => zoomChartByFactor(thermalChart, 1.4));
 $("btn-reset-thermal-zoom").addEventListener("click", () => resetChartZoom(thermalChart));
 
+if (btnToggleThermalAutoY) {
+  btnToggleThermalAutoY.addEventListener("click", () => {
+    setThermalAutoY(!isThermalAutoY);
+  });
+}
+
 $("btn-elec-zoom-in").addEventListener("click", () => zoomChartByFactor(elecChart, 0.7));
 $("btn-elec-zoom-out").addEventListener("click", () => zoomChartByFactor(elecChart, 1.4));
 $("btn-reset-elec-zoom").addEventListener("click", () => resetChartZoom(elecChart));
+
+// ═══════════════════════════════════════════════════════════════════════════
+// THEME SWITCHING (White Background Default & Dark Mode Toggle)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function applyChartTheme(chart, dark) {
+  if (!chart || !chart.options) return;
+  const c = getThemeColors(dark);
+
+  if (chart.options.scales.x) {
+    chart.options.scales.x.ticks.color = c.tick;
+    chart.options.scales.x.title.color = c.tick;
+    chart.options.scales.x.grid.color  = c.grid;
+  }
+
+  if (chart === thermalChart) {
+    if (chart.options.scales.y) {
+      chart.options.scales.y.ticks.color = c.tick;
+      chart.options.scales.y.title.color = c.tick;
+      chart.options.scales.y.grid.color  = c.grid;
+    }
+    if (chart.data.datasets[0]) {
+      chart.data.datasets[0].borderColor = c.measured;
+      chart.data.datasets[0].backgroundColor = c.fillMeas;
+    }
+    if (chart.data.datasets[1]) {
+      chart.data.datasets[1].borderColor = c.pred3s;
+      chart.data.datasets[1].backgroundColor = c.fill3s;
+    }
+    if (chart.data.datasets[2]) {
+      chart.data.datasets[2].borderColor = c.pred10s;
+      chart.data.datasets[2].backgroundColor = c.fill10s;
+    }
+    if (chart.data.datasets[3]) {
+      chart.data.datasets[3].borderColor = c.ambient;
+      chart.data.datasets[3].backgroundColor = c.fillAmb;
+    }
+  } else if (chart === elecChart) {
+    if (chart.options.scales.yV) {
+      chart.options.scales.yV.ticks.color = c.vdrop;
+      chart.options.scales.yV.title.color = c.vdrop;
+      chart.options.scales.yV.grid.color  = c.grid;
+    }
+    if (chart.options.scales.yI) {
+      chart.options.scales.yI.ticks.color = c.current;
+      chart.options.scales.yI.title.color = c.current;
+    }
+    if (chart.options.scales.yP) {
+      chart.options.scales.yP.ticks.color = c.power;
+      chart.options.scales.yP.title.color = c.power;
+    }
+    if (chart.data.datasets[0]) chart.data.datasets[0].borderColor = c.vdrop;
+    if (chart.data.datasets[1]) chart.data.datasets[1].borderColor = c.current;
+    if (chart.data.datasets[2]) chart.data.datasets[2].borderColor = c.power;
+  }
+
+  if (chart.options.plugins?.legend?.labels) {
+    chart.options.plugins.legend.labels.color = c.tick;
+  }
+  if (chart.options.plugins?.tooltip) {
+    chart.options.plugins.tooltip.backgroundColor = c.tooltipBg;
+    chart.options.plugins.tooltip.titleColor       = c.tooltipTitle;
+    chart.options.plugins.tooltip.bodyColor        = c.tooltipBody;
+    chart.options.plugins.tooltip.borderColor      = c.tooltipBorder;
+  }
+}
+
+function setTheme(dark) {
+  isDarkMode = dark;
+  activeColors = getThemeColors(dark);
+  chartGridColor = activeColors.grid;
+  chartTickColor = activeColors.tick;
+  document.documentElement.classList.toggle("dark", dark);
+
+  const sunIcon = $("theme-icon-sun");
+  const moonIcon = $("theme-icon-moon");
+  const themeLabel = $("theme-label");
+
+  if (sunIcon && moonIcon && themeLabel) {
+    if (dark) {
+      sunIcon.classList.remove("hidden");
+      moonIcon.classList.add("hidden");
+      themeLabel.textContent = "Light Mode";
+    } else {
+      sunIcon.classList.add("hidden");
+      moonIcon.classList.remove("hidden");
+      themeLabel.textContent = "Dark Mode";
+    }
+  }
+
+  applyChartTheme(thermalChart, dark);
+  applyChartTheme(elecChart, dark);
+  thermalChart.update("none");
+  elecChart.update("none");
+
+  localStorage.setItem(THEME_KEY, dark ? "dark" : "light");
+}
+
+function initTheme() {
+  const saved = localStorage.getItem(THEME_KEY);
+  // Default is WHITE BACKGROUND (isDarkMode = false)
+  const shouldBeDark = saved === "dark";
+  setTheme(shouldBeDark);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// EXPORT GRAPH AS PNG (Proper labels, legends, grid, and solid background)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function exportChartAsPNG(chart, chartTitle, defaultFilename) {
+  if (!chart || !chart.canvas) return;
+
+  const wasDark = isDarkMode;
+  if (wasDark) {
+    // Temporarily switch chart colors to light theme for crisp white-background export
+    applyChartTheme(chart, false);
+    chart.render();
+  }
+
+  try {
+    const srcCanvas = chart.canvas;
+    const pixelRatio = window.devicePixelRatio || 1;
+    const scale = Math.max(2, pixelRatio); // at least 2x scale for crisp print quality
+
+    const clientWidth = srcCanvas.clientWidth || (srcCanvas.width / pixelRatio);
+    const clientHeight = srcCanvas.clientHeight || (srcCanvas.height / pixelRatio);
+
+    const padX = 24 * scale;
+    const padTop = 64 * scale;
+    const padBottom = 24 * scale;
+
+    const outCanvas = document.createElement("canvas");
+    outCanvas.width = clientWidth * scale + padX * 2;
+    outCanvas.height = clientHeight * scale + padTop + padBottom;
+
+    const ctx = outCanvas.getContext("2d");
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+
+    // 1. Solid pure white background (never transparent)
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, outCanvas.width, outCanvas.height);
+
+    // 2. Crisp container border
+    ctx.strokeStyle = "#e2e8f0";
+    ctx.lineWidth = 1 * scale;
+    ctx.strokeRect(scale, scale, outCanvas.width - 2 * scale, outCanvas.height - 2 * scale);
+
+    // 3. Header title
+    ctx.fillStyle = "#0f172a"; // slate-900
+    ctx.font = `bold ${13 * scale}px Inter, system-ui, -apple-system, sans-serif`;
+    ctx.textAlign = "left";
+    ctx.fillText(chartTitle, padX, 26 * scale);
+
+    // 4. Header subtitle with timestamp & window
+    const now = new Date();
+    const dateStr = now.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) +
+      " " + now.toLocaleTimeString();
+    const spanSec = chart._userSpan ? Math.round(chart._userSpan / 1000) : WINDOW_SEC;
+    ctx.fillStyle = "#64748b"; // slate-500
+    ctx.font = `${9 * scale}px Inter, system-ui, -apple-system, sans-serif`;
+    const subText = chart === thermalChart
+      ? `Project ThermoGuard • Window: ${spanSec}s • Scale: 0–100°C (Cutoff: 80°C) • ${dateStr}`
+      : `Project ThermoGuard • Window: ${spanSec}s • Telemetry: V_drop, I_load, P_diss • ${dateStr}`;
+    ctx.fillText(subText, padX, 42 * scale);
+
+    // 5. Divider line
+    ctx.strokeStyle = "#e2e8f0";
+    ctx.lineWidth = 1 * scale;
+    ctx.beginPath();
+    ctx.moveTo(padX, 52 * scale);
+    ctx.lineTo(outCanvas.width - padX, 52 * scale);
+    ctx.stroke();
+
+    // 6. Draw chart canvas (which includes legends, labels, axis lines, grid, and data)
+    ctx.drawImage(
+      srcCanvas,
+      0, 0, srcCanvas.width, srcCanvas.height,
+      padX, padTop, clientWidth * scale, clientHeight * scale
+    );
+
+    // 7. Footer metadata
+    ctx.fillStyle = "#94a3b8"; // slate-400
+    ctx.font = `${8 * scale}px Inter, system-ui, -apple-system, sans-serif`;
+    ctx.textAlign = "right";
+    ctx.fillText("KA7808 Thermal Profiling • STM32 Nucleo-F401RE • TinyML Dual-Horizon", outCanvas.width - padX, outCanvas.height - 8 * scale);
+
+    // 8. Trigger PNG download
+    const tsStr = now.toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const link = document.createElement("a");
+    link.download = `${defaultFilename}_${tsStr}.png`;
+    link.href = outCanvas.toDataURL("image/png");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  } finally {
+    if (wasDark) {
+      // Restore dark theme if it was previously dark
+      applyChartTheme(chart, true);
+      chart.render();
+    }
+  }
+}
+
+if ($("btn-export-thermal-png")) {
+  $("btn-export-thermal-png").addEventListener("click", () => {
+    exportChartAsPNG(thermalChart, "Project ThermoGuard — Thermal Tracking Profile", "thermoguard_thermal_graph");
+  });
+}
+
+if ($("btn-export-elec-png")) {
+  $("btn-export-elec-png").addEventListener("click", () => {
+    exportChartAsPNG(elecChart, "Project ThermoGuard — Electrical Metrics Profile", "thermoguard_electrical_graph");
+  });
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // AUDIBLE ALARM (Web Audio API — no external file needed)
@@ -612,6 +1235,9 @@ function handleTelemetry(d) {
   advanceLiveWindow(thermalChart, ts);
   advanceLiveWindow(elecChart, ts);
 
+  // ── Dynamically zoom Y-axis on thermal chart ──
+  updateThermalYAutoZoom(thermalChart);
+
   // ── Trim historical buffer ──
   trimChart(thermalChart, ts);
   trimChart(elecChart, ts);
@@ -717,53 +1343,54 @@ function trimChart(chart, latestTs) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// THERMAL SAFETY ZONE (KA7808 Profile: 125°C Max Op, 150°C Shutdown)
+// THERMAL SAFETY ZONE (Cutoff: 80°C, Max: 100°C)
 // ═══════════════════════════════════════════════════════════════════════════
 
-const T_MIN = 25;
-const T_MAX_OPERATING = 125;
-const T_SHUTDOWN = 150;
+const T_MIN = 0;
+const T_WARN = 70;
+const T_CUTOFF = 80;
+const T_MAX = 100;
 
 function updateThermalZone(tempC) {
-  // Marker position (25°C → 0%, 150°C → 100%)
-  const rawPct = ((tempC - T_MIN) / (T_SHUTDOWN - T_MIN)) * 100;
+  // Marker position (0°C → 0%, 100°C → 100%)
+  const rawPct = ((tempC - T_MIN) / (T_MAX - T_MIN)) * 100;
   const pct = Math.max(1, Math.min(99, rawPct));
   thermalMarker.style.left = pct.toFixed(1) + "%";
 
-  if (tempC >= T_SHUTDOWN) {
-    // CRITICAL THERMAL SHUTDOWN (≥150°C) — Flashing red + audible alarm
+  if (tempC >= T_MAX) {
+    // CRITICAL THERMAL OVER-MAX (≥100°C) — Flashing red + audible alarm
     kpiThermal.classList.add("glow-red");
     kpiThermal.classList.remove("glow-amber");
     thermalDot.className = "w-2.5 h-2.5 rounded-full bg-red-600 dot-blink";
-    thermalLabel.textContent = "SHUTDOWN (≥150°C)";
-    thermalLabel.className = "text-[10px] font-bold text-red-400 tracking-tight";
-    kpiTempVal.className = "text-xl font-bold text-red-500 tabular-nums";
+    thermalLabel.textContent = "OVER-MAX (≥100°C)";
+    thermalLabel.className = "text-[10px] font-bold text-red-600 dark:text-red-400 tracking-tight";
+    kpiTempVal.className = "text-xl font-bold text-red-600 dark:text-red-500 tabular-nums";
     startAlarm();
-  } else if (tempC >= T_MAX_OPERATING) {
-    // OPERATING MAX EXCEEDED (125°C - 150°C) — Warning alarm + critical red
+  } else if (tempC >= T_CUTOFF) {
+    // THERMAL CUTOFF (≥80°C) — Flashing rose/red + audible alarm
     kpiThermal.classList.add("glow-red");
     kpiThermal.classList.remove("glow-amber");
-    thermalDot.className = "w-2.5 h-2.5 rounded-full bg-rose-500 dot-blink";
-    thermalLabel.textContent = "OVER-MAX (≥125°C)";
-    thermalLabel.className = "text-[10px] font-semibold text-rose-400";
-    kpiTempVal.className = "text-xl font-bold text-rose-400 tabular-nums";
+    thermalDot.className = "w-2.5 h-2.5 rounded-full bg-rose-600 dot-blink";
+    thermalLabel.textContent = "CUTOFF (≥80°C)";
+    thermalLabel.className = "text-[10px] font-bold text-rose-600 dark:text-rose-400 tracking-tight";
+    kpiTempVal.className = "text-xl font-bold text-rose-600 dark:text-rose-400 tabular-nums";
     startAlarm();
-  } else if (tempC >= 90) {
-    // ELEVATED / WARNING (90°C - 125°C) — Amber glow
+  } else if (tempC >= T_WARN) {
+    // ELEVATED / WARNING (70°C - 80°C) — Amber glow
     kpiThermal.classList.remove("glow-red");
     kpiThermal.classList.add("glow-amber");
-    thermalDot.className = "w-2.5 h-2.5 rounded-full bg-amber-400";
-    thermalLabel.textContent = "WARNING (≥90°C)";
-    thermalLabel.className = "text-[10px] font-semibold text-amber-400";
-    kpiTempVal.className = "text-xl font-bold text-amber-400 tabular-nums";
+    thermalDot.className = "w-2.5 h-2.5 rounded-full bg-amber-500";
+    thermalLabel.textContent = "WARNING (≥70°C)";
+    thermalLabel.className = "text-[10px] font-semibold text-amber-600 dark:text-amber-400";
+    kpiTempVal.className = "text-xl font-bold text-amber-600 dark:text-amber-400 tabular-nums";
     stopAlarm();
   } else {
-    // NOMINAL SAFE (< 90°C) — Green
+    // NOMINAL SAFE (< 70°C) — Green
     kpiThermal.classList.remove("glow-red", "glow-amber");
     thermalDot.className = "w-2.5 h-2.5 rounded-full bg-emerald-500";
-    thermalLabel.textContent = "SAFE (<90°C)";
-    thermalLabel.className = "text-[10px] font-semibold text-emerald-400";
-    kpiTempVal.className = "text-xl font-bold text-emerald-400 tabular-nums";
+    thermalLabel.textContent = "SAFE (<70°C)";
+    thermalLabel.className = "text-[10px] font-semibold text-emerald-600 dark:text-emerald-400";
+    kpiTempVal.className = "text-xl font-bold text-emerald-600 dark:text-emerald-400 tabular-nums";
     stopAlarm();
   }
 }
@@ -782,7 +1409,7 @@ function updateFaults(code, faultList) {
       if (code & (1 << i)) {
         DIAG_DOTS[i].className = "w-2 h-2 rounded-full bg-rose-500 dot-blink";
       } else {
-        DIAG_DOTS[i].className = "w-2 h-2 rounded-full bg-gray-600";
+        DIAG_DOTS[i].className = "w-2 h-2 rounded-full bg-slate-300 dark:bg-gray-600";
       }
     }
   }
@@ -839,14 +1466,14 @@ function setConnectionUI(connected) {
   if (connected) {
     connDot.className      = "w-2 h-2 rounded-full bg-emerald-500 dot-blink";
     connLabel.textContent  = "Online";
-    connLabel.className    = "text-xs text-emerald-400";
+    connLabel.className    = "text-xs text-emerald-600 dark:text-emerald-400 font-medium";
     btnConnect.classList.add("hidden");
     btnDisconnect.classList.remove("hidden");
     sessionStart = sessionStart || Date.now();
   } else {
-    connDot.className      = "w-2 h-2 rounded-full bg-gray-600";
+    connDot.className      = "w-2 h-2 rounded-full bg-slate-400 dark:bg-gray-600";
     connLabel.textContent  = "Offline";
-    connLabel.className    = "text-xs text-gray-500";
+    connLabel.className    = "text-xs text-slate-500 dark:text-gray-500 font-medium";
     btnConnect.classList.remove("hidden");
     btnDisconnect.classList.add("hidden");
     stopAlarm();
@@ -1004,7 +1631,7 @@ async function resetWholePage() {
   if (kpiPred3sVal) kpiPred3sVal.textContent = "—";
   if (kpiPred10sVal) kpiPred10sVal.textContent = "—";
   kpiTempVal.textContent = "—";
-  kpiTempVal.className = "text-xl font-bold text-emerald-400 tabular-nums";
+  kpiTempVal.className = "text-xl font-bold text-emerald-600 dark:text-emerald-400 tabular-nums";
   if (kpiPredTimeVal) kpiPredTimeVal.textContent = "—";
   if (kpiPredTimeSub) kpiPredTimeSub.textContent = "DWT Cycle Latency";
 
@@ -1013,7 +1640,7 @@ async function resetWholePage() {
   kpiThermal.classList.remove("glow-red", "glow-amber");
   thermalDot.className = "w-2.5 h-2.5 rounded-full bg-emerald-500";
   thermalLabel.textContent = "SAFE";
-  thermalLabel.className = "text-[10px] font-semibold text-emerald-400";
+  thermalLabel.className = "text-[10px] font-semibold text-emerald-600 dark:text-emerald-400";
   stopAlarm();
 
   // Reset live readings
@@ -1036,13 +1663,13 @@ async function resetWholePage() {
 
   // Reset diagnostic dots
   for (let i = 0; i < 4; i++) {
-    if (DIAG_DOTS[i]) DIAG_DOTS[i].className = "w-2 h-2 rounded-full bg-gray-600";
+    if (DIAG_DOTS[i]) DIAG_DOTS[i].className = "w-2 h-2 rounded-full bg-slate-300 dark:bg-gray-600";
   }
 
   // Visual button feedback
   if (btnResetPage) {
     const origHtml = btnResetPage.innerHTML;
-    btnResetPage.innerHTML = `<svg class="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg><span class="text-emerald-400">Reset!</span>`;
+    btnResetPage.innerHTML = `<svg class="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg><span class="text-emerald-600 dark:text-emerald-400">Reset!</span>`;
     setTimeout(() => {
       btnResetPage.innerHTML = origHtml;
     }, 1000);
@@ -1067,6 +1694,7 @@ setInterval(() => {
 btnRefresh.addEventListener("click", fetchPorts);
 btnConnect.addEventListener("click", doConnect);
 btnDisconnect.addEventListener("click", doDisconnect);
+if (btnThemeToggle) btnThemeToggle.addEventListener("click", () => setTheme(!isDarkMode));
 if (btnResetPage) btnResetPage.addEventListener("click", resetWholePage);
 btnExportCsv.addEventListener("click", exportSessionCSV);
 
@@ -1075,6 +1703,7 @@ btnExportCsv.addEventListener("click", exportSessionCSV);
 // ═══════════════════════════════════════════════════════════════════════════
 
 (function init() {
+  initTheme();
   fetchPorts();
   wsConnect();
 })();
