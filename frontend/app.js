@@ -141,12 +141,14 @@ let isConnected = false;
 let sessionStart = null;
 
 // Error accumulation for MAE / RMSE
-let errorSum   = 0;
-let errorSqSum = 0;
-let errorCount = 0;
-let frameCount = 0;
+let errorSum      = 0;
+let errorSqSum3s  = 0;
+let errorSqSum10s = 0;
+let errorCount    = 0;
+let frameCount    = 0;
 let malformedCount = 0;
-let maxRmse = 0;
+let maxRmse3s     = 0;
+let maxRmse10s    = 0;
 let maxTrackingError3s  = 0;
 let maxTrackingError10s = 0;
 
@@ -1269,18 +1271,22 @@ function handleTelemetry(d) {
     kpiAmbTempVal.textContent = d.T_ambient.toFixed(2) + " °C";
   }
 
-  // ── KPI: RMSE ──
-  const tErr = d.tracking_error_3s;
-  errorSum   += tErr;
-  errorSqSum += tErr * tErr;
+  // ── KPI: RMSE (3s and 10s lookahead) ──
+  const tErr3s  = d.tracking_error_3s;
+  const tErr10s = d.tracking_error_10s;
+  errorSum      += tErr3s;
+  errorSqSum3s  += tErr3s * tErr3s;
+  errorSqSum10s += tErr10s * tErr10s;
   errorCount++;
-  const curRmse = Math.sqrt(errorSqSum / errorCount);
-  if (curRmse > maxRmse) maxRmse = curRmse;
+  const curRmse3s  = Math.sqrt(errorSqSum3s / errorCount);
+  const curRmse10s = Math.sqrt(errorSqSum10s / errorCount);
+  if (curRmse3s > maxRmse3s)   maxRmse3s  = curRmse3s;
+  if (curRmse10s > maxRmse10s) maxRmse10s = curRmse10s;
   if (kpiRmseVal) {
-    kpiRmseVal.textContent = curRmse.toFixed(3);
+    kpiRmseVal.textContent = `${curRmse3s.toFixed(2)} / ${curRmse10s.toFixed(2)}`;
   }
   if (kpiRmseMaxVal) {
-    kpiRmseMaxVal.textContent = maxRmse.toFixed(3);
+    kpiRmseMaxVal.textContent = `${maxRmse3s.toFixed(2)} / ${maxRmse10s.toFixed(2)}`;
   }
 
   // ── KPI: Predicted Temperatures (+3s and +10s) ──
@@ -1532,7 +1538,8 @@ async function doConnect() {
       // Reset session metrics
       pred3sLookaheadBuffer.length = 0;
       pred10sLookaheadBuffer.length = 0;
-      errorSum = errorSqSum = errorCount = frameCount = malformedCount = 0;
+      errorSum = errorSqSum3s = errorSqSum10s = errorCount = frameCount = malformedCount = 0;
+      maxRmse3s = maxRmse10s = maxTrackingError3s = maxTrackingError10s = 0;
       latencySum = latencyCount = 0;
     } else {
       alert(data.error || "Connection failed");
@@ -1628,9 +1635,11 @@ async function resetWholePage() {
   // Reset counters & accumulators
   resetTempGlitchFilters();
   errorSum = 0;
-  errorSqSum = 0;
+  errorSqSum3s = 0;
+  errorSqSum10s = 0;
   errorCount = 0;
-  maxRmse = 0;
+  maxRmse3s = 0;
+  maxRmse10s = 0;
   maxTrackingError3s = 0;
   maxTrackingError10s = 0;
   frameCount = 0;
