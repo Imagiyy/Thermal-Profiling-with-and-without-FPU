@@ -184,7 +184,10 @@
       <!-- KPI: Tracking Error -->
       <div id="kpi-error" class="glass rounded-xl p-3 flex flex-col gap-0.5 transition-all hover:border-slate-300 dark:hover:border-white/10">
         <span class="text-[10px] uppercase tracking-wider text-slate-500 dark:text-gray-400 font-semibold">Tracking Error</span>
-        <span id="kpi-error-val" class="text-xl font-bold text-cyan-700 dark:text-accent-cyan tabular-nums">—</span>
+        <div class="flex items-baseline justify-between gap-1 flex-wrap">
+          <span id="kpi-error-val" class="text-xl font-bold text-cyan-700 dark:text-accent-cyan tabular-nums">—</span>
+          <span class="text-[11px] text-slate-400 dark:text-gray-400 font-mono whitespace-nowrap">Max: <span id="kpi-error-max-val" class="text-cyan-700 dark:text-accent-cyan font-semibold tabular-nums">—</span></span>
+        </div>
         <span class="text-[10px] text-slate-500 dark:text-gray-500">3s / 10s lookahead error °C</span>
       </div>
 
@@ -198,7 +201,10 @@
       <!-- KPI: RMSE -->
       <div class="glass rounded-xl p-3 flex flex-col gap-0.5 transition-all hover:border-slate-300 dark:hover:border-white/10">
         <span class="text-[10px] uppercase tracking-wider text-slate-500 dark:text-gray-400 font-semibold">Session RMSE</span>
-        <span id="kpi-rmse-val" class="text-xl font-bold text-purple-600 dark:text-purple-400 tabular-nums">—</span>
+        <div class="flex items-baseline justify-between gap-1 flex-wrap">
+          <span id="kpi-rmse-val" class="text-xl font-bold text-purple-600 dark:text-purple-400 tabular-nums">—</span>
+          <span class="text-[11px] text-slate-400 dark:text-gray-400 font-mono whitespace-nowrap">Max: <span id="kpi-rmse-max-val" class="text-purple-600 dark:text-purple-300 font-semibold tabular-nums">—</span></span>
+        </div>
         <span class="text-[10px] text-slate-500 dark:text-gray-500">Root Mean Sq. Error °C</span>
       </div>
 

@@ -100,9 +100,11 @@ const btnExportElecPng    = $("btn-export-elec-png");
 const btnResetPage        = $("btn-reset-page");
 const btnExportCsv        = $("btn-export-csv");
 
-const kpiErrorVal   = $("kpi-error-val");
-const kpiAmbTempVal = $("kpi-amb-temp-val");
-const kpiRmseVal    = $("kpi-rmse-val");
+const kpiErrorVal    = $("kpi-error-val");
+const kpiErrorMaxVal = $("kpi-error-max-val");
+const kpiAmbTempVal  = $("kpi-amb-temp-val");
+const kpiRmseVal     = $("kpi-rmse-val");
+const kpiRmseMaxVal  = $("kpi-rmse-max-val");
 const kpiPred3sVal  = $("kpi-pred-3s-val");
 const kpiPred10sVal = $("kpi-pred-10s-val");
 const kpiRthetaVal  = $("kpi-rtheta-val");
@@ -144,6 +146,9 @@ let errorSqSum = 0;
 let errorCount = 0;
 let frameCount = 0;
 let malformedCount = 0;
+let maxRmse = 0;
+let maxTrackingError3s  = 0;
+let maxTrackingError10s = 0;
 
 // Inference latency accumulation (DWT benchmarking)
 let latencySum   = 0;
@@ -1249,8 +1254,14 @@ function handleTelemetry(d) {
   });
 
   // ── KPI: Tracking error (displays 3s and 10s lookahead error) ──
+  if (d.tracking_error_3s > maxTrackingError3s)   maxTrackingError3s  = d.tracking_error_3s;
+  if (d.tracking_error_10s > maxTrackingError10s) maxTrackingError10s = d.tracking_error_10s;
+
   if (kpiErrorVal) {
     kpiErrorVal.textContent = `${d.tracking_error_3s.toFixed(2)} / ${d.tracking_error_10s.toFixed(2)}`;
+  }
+  if (kpiErrorMaxVal) {
+    kpiErrorMaxVal.textContent = `${maxTrackingError3s.toFixed(2)} / ${maxTrackingError10s.toFixed(2)}`;
   }
 
   // ── KPI: Ambient Temp (Replaced MAE) ──
@@ -1263,8 +1274,13 @@ function handleTelemetry(d) {
   errorSum   += tErr;
   errorSqSum += tErr * tErr;
   errorCount++;
+  const curRmse = Math.sqrt(errorSqSum / errorCount);
+  if (curRmse > maxRmse) maxRmse = curRmse;
   if (kpiRmseVal) {
-    kpiRmseVal.textContent = Math.sqrt(errorSqSum / errorCount).toFixed(3);
+    kpiRmseVal.textContent = curRmse.toFixed(3);
+  }
+  if (kpiRmseMaxVal) {
+    kpiRmseMaxVal.textContent = maxRmse.toFixed(3);
   }
 
   // ── KPI: Predicted Temperatures (+3s and +10s) ──
@@ -1614,6 +1630,9 @@ async function resetWholePage() {
   errorSum = 0;
   errorSqSum = 0;
   errorCount = 0;
+  maxRmse = 0;
+  maxTrackingError3s = 0;
+  maxTrackingError10s = 0;
   frameCount = 0;
   malformedCount = 0;
   latencySum = 0;
@@ -1626,8 +1645,10 @@ async function resetWholePage() {
 
   // Reset all top row KPI cards
   kpiErrorVal.textContent = "—";
+  if (kpiErrorMaxVal) kpiErrorMaxVal.textContent = "—";
   if (kpiAmbTempVal) kpiAmbTempVal.textContent = "—";
   kpiRmseVal.textContent = "—";
+  if (kpiRmseMaxVal) kpiRmseMaxVal.textContent = "—";
   if (kpiPred3sVal) kpiPred3sVal.textContent = "—";
   if (kpiPred10sVal) kpiPred10sVal.textContent = "—";
   kpiTempVal.textContent = "—";
