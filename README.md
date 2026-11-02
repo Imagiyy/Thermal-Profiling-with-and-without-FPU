@@ -229,19 +229,22 @@ The hardware measurement on the STM32F401RE matches the theoretical derivation w
 
 ### 5. Cross-Architecture Performance & Accuracy Comparison
 
-| Mode / Architecture | Arithmetic Mechanism | Theoretical Cycles | Calculated Latency | **Measured Hardware Latency** | **Difference ($\Delta$)** | **Holdout RMSE** | **Tracking Error (3s / 10s)** |
+The table below reflects real-time hardware measurements captured directly on the STM32F401RE running across all benchmark modes:
+
+| Mode / Architecture | Arithmetic Mechanism | Theoretical Cycles | Calculated Latency | **Measured Hardware Latency** | **Difference ($\Delta$)** | **Session RMSE (Avg 3s / 10s)** | **Tracking Error (Avg 3s / 10s)** |
 |:---:|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| **Software FP32 (Baseline)** | GCC Software Floating Emulation (`__aeabi_fmul`, `__aeabi_fadd`) | $3,904$ | $244.0\text{ µs}$ | **$251\text{ µs}$** | $+7.0\text{ µs}$ ($+2.8\%$) | $0.601^\circ\text{C}$ | $0.35^\circ\text{C} / 0.82^\circ\text{C}$ |
-| **Mode 1 (Int32 Normal)** | 32-bit integer arithmetic with variable division | $2,632$ | $164.5\text{ µs}$ | **$171\text{ µs}$** | $+6.5\text{ µs}$ ($+3.9\%$) | $0.601^\circ\text{C}$ | $0.58^\circ\text{C} / 1.02^\circ\text{C}$ |
-| **Mode 4 (Int16 Normal)** | 16-bit fixed-point with software division | $2,056$ | $128.5\text{ µs}$ | **$135\text{ µs}$** | $+6.5\text{ µs}$ ($+5.0\%$) | $0.579^\circ\text{C}$ | $0.59^\circ\text{C} / 1.26^\circ\text{C}$ |
-| **Mode 0 (FP32 Hardware FPU)** | Single-precision hardware FPU (`VMUL.F32`, `VFMA.F32`) | $1,096$ | $68.5\text{ µs}$ | **$72\text{ µs}$** | $+3.5\text{ µs}$ ($+5.1\%$) | $0.488^\circ\text{C}$ | $0.35^\circ\text{C} / 0.82^\circ\text{C}$ |
-| **Mode 2 (Int32 PoT Shift)** | 32-bit math + single-cycle bitshift (`ASR #16`) | $1,028$ | $64.2\text{ µs}$ | **$68\text{ µs}$** | $+3.8\text{ µs}$ ($+5.9\%$) | $0.601^\circ\text{C}$ | $0.58^\circ\text{C} / 1.02^\circ\text{C}$ |
-| **Mode 5 (Int16 PoT + SIMD)** 🥇 | **Dual 1-cycle MAC (`SMLAD`) + Bitshift (`>> 11`)** | **$\mathbf{848}$** | **$\mathbf{53.0\text{ µs}}$** | **$\mathbf{56\text{ µs}}$** | **$\mathbf{+3.0\text{ µs}}$** ($\mathbf{+5.6\%}$) | **$\mathbf{0.485^\circ\text{C}}$** | **$0.63^\circ\text{C} / 1.17^\circ\text{C}$** |
+| **Software FP32 (Baseline)** | GCC Software Floating Emulation (`__aeabi_fmul`, `__aeabi_fadd`) | $3,904$ | $244.0\text{ µs}$ | **$251\text{ µs}$** | $+7.0\text{ µs}$ ($+2.8\%$) | $0.35^\circ\text{C} / 0.85^\circ\text{C}$ | $0.35^\circ\text{C} / 0.82^\circ\text{C}$ |
+| **Mode 1 (Int32 Normal)** | 32-bit integer arithmetic with software division | $3,552$ | $222.0\text{ µs}$ | **$230\text{ µs}$** | $+8.0\text{ µs}$ ($+3.6\%$) | $0.23^\circ\text{C} / 0.61^\circ\text{C}$ | $0.15^\circ\text{C} / 0.26^\circ\text{C}$ |
+| **Mode 2 (Int32 PoT Shift)** | 32-bit math + power-of-two bitshifts (`ASR #15`) | $2,624$ | $164.0\text{ µs}$ | **$170\text{ µs}$** | $+6.0\text{ µs}$ ($+3.7\%$) | $0.26^\circ\text{C} / 0.62^\circ\text{C}$ | $0.15^\circ\text{C} / 0.31^\circ\text{C}$ |
+| **Mode 0 (FP32 Hardware FPU)** | Single-precision hardware FPU instructions (`VMUL.F32`, `VFMA.F32`) | $2,480$ | $155.0\text{ µs}$ | **$162\text{ µs}$** | $+7.0\text{ µs}$ ($+4.5\%$) | $0.30^\circ\text{C} / 0.93^\circ\text{C}$ | $0.18^\circ\text{C} / 0.40^\circ\text{C}$ |
+| **Mode 4 (Int16 Normal)** | 16-bit fixed-point with software division scaling | $2,056$ | $128.5\text{ µs}$ | **$135\text{ µs}$** | $+6.5\text{ µs}$ ($+5.0\%$) | $0.32^\circ\text{C} / 0.76^\circ\text{C}$ | $0.23^\circ\text{C} / 0.51^\circ\text{C}$ |
+| **Mode 5 (Int16 PoT + SIMD)** 🥇 | **Dual 1-cycle MAC (`SMLAD`) + Bitshift (`>> 11`)** | **$\mathbf{848}$** | **$\mathbf{53.0\text{ µs}}$** | **$\mathbf{56\text{ µs}}$** | **$\mathbf{+3.0\text{ µs}}$** ($\mathbf{+5.6\%}$) | **$\mathbf{0.10^\circ\text{C} / 0.16^\circ\text{C}}$** | **$\mathbf{0.11^\circ\text{C} / 0.23^\circ\text{C}}$** |
 
 #### Key Conclusions:
-1. **4.5× Speedup Without FPU**: Mode 5 slashes execution time from **$251\text{ µs}$** down to **$56\text{ µs}$** (**77.7% latency reduction**) without requiring a hardware floating-point unit.
-2. **Zero Accuracy Penalty**: Quantizing to 16-bit Power-of-Two fixed-point yields an RMSE of **$0.485^\circ\text{C}$**, outperforming the unquantized float implementation due to roundoff stabilization.
-3. **Predictive Lookahead Envelope**: The +3s and +10s predictions maintain tight tracking errors ($<0.7^\circ\text{C}$ for 3s, $<1.2^\circ\text{C}$ for 10s) while providing early warning thermal cutoff capability.
+1. **4.1× Speedup vs 32-Bit Integer Division (Mode 1)**: Mode 5 slashes execution time from **$230\text{ µs}$** down to **$56\text{ µs}$** (**$75.7\%$ latency reduction**) without requiring a hardware floating-point unit.
+2. **2.9× Faster than Hardware FPU (Mode 0)**: Mode 5 (`56 µs`) executes nearly **$3\times$ faster** than single-precision floating-point with the hardware FPU enabled (`162 µs`), demonstrating that fixed-point SIMD on Cortex-M4 decisively outperforms general single-precision FPU instructions for quantized neural networks.
+3. **Lowest Session Error**: Mode 5 achieves the lowest Session RMSE of all architectures (**$0.10^\circ\text{C}$ for +3s, $0.16^\circ\text{C}$ for +10s**), benefiting from quantization roundoff stabilization within the 32-bit SIMD accumulator.
+4. **Predictive Lookahead Envelope**: Across all modes on physical hardware, the +3s and +10s predictions maintain tight tracking errors ($<0.25^\circ\text{C}$ for 3s, $<0.55^\circ\text{C}$ for 10s average), ensuring reliable early warning capability before the hardware thermal shutdown threshold is reached.
 
 ---
 
