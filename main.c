@@ -76,8 +76,8 @@ static volatile uint8_t active_model = ACTIVE_MODEL;
 #define MOSFET_GPIO_PORT           GPIOA
 #define MOSFET_PIN                 8U
 #define MOSFET_ACTIVE_HIGH         1U
-#define THERMAL_SHUTDOWN_THRESHOLD 9000  /* Disconnect at >= 90.0 °C (9000 cC) */
-#define THERMAL_RECOVERY_THRESHOLD 8000  /* Reconnect when cooled below 80.0 °C (hysteresis) */
+#define THERMAL_SHUTDOWN_THRESHOLD 8000  /* Disconnect at >= 80.0 °C (8000 cC) */
+#define THERMAL_RECOVERY_THRESHOLD 7000  /* Reconnect when cooled below 70.0 °C (hysteresis) */
 
 /* fault bits */
 #define F_INA219           0x01U
