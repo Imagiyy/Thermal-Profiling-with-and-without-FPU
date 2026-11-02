@@ -101,10 +101,10 @@ const btnResetPage        = $("btn-reset-page");
 const btnExportCsv        = $("btn-export-csv");
 
 const kpiErrorVal    = $("kpi-error-val");
-const kpiErrorMaxVal = $("kpi-error-max-val");
+const kpiErrorAvgVal = $("kpi-error-avg-val") || $("kpi-error-max-val");
 const kpiAmbTempVal  = $("kpi-amb-temp-val");
 const kpiRmseVal     = $("kpi-rmse-val");
-const kpiRmseMaxVal  = $("kpi-rmse-max-val");
+const kpiRmseAvgVal  = $("kpi-rmse-avg-val") || $("kpi-rmse-max-val");
 const kpiPred3sVal  = $("kpi-pred-3s-val");
 const kpiPred10sVal = $("kpi-pred-10s-val");
 const kpiRthetaVal  = $("kpi-rtheta-val");
@@ -141,16 +141,15 @@ let isConnected = false;
 let sessionStart = null;
 
 // Error accumulation for MAE / RMSE
-let errorSum      = 0;
+let errorSum3s    = 0;
+let errorSum10s   = 0;
 let errorSqSum3s  = 0;
 let errorSqSum10s = 0;
 let errorCount    = 0;
 let frameCount    = 0;
 let malformedCount = 0;
-let maxRmse3s     = 0;
-let maxRmse10s    = 0;
-let maxTrackingError3s  = 0;
-let maxTrackingError10s = 0;
+let rmseSum3s     = 0;
+let rmseSum10s    = 0;
 
 // Inference latency accumulation (DWT benchmarking)
 let latencySum   = 0;
@@ -1255,15 +1254,30 @@ function handleTelemetry(d) {
     elecChart.update("none");
   });
 
-  // ── KPI: Tracking error (displays 3s and 10s lookahead error) ──
-  if (d.tracking_error_3s > maxTrackingError3s)   maxTrackingError3s  = d.tracking_error_3s;
-  if (d.tracking_error_10s > maxTrackingError10s) maxTrackingError10s = d.tracking_error_10s;
+  // ── Error Accumulation (3s and 10s lookahead) ──
+  const tErr3s  = d.tracking_error_3s;
+  const tErr10s = d.tracking_error_10s;
+  errorSum3s    += tErr3s;
+  errorSum10s   += tErr10s;
+  errorSqSum3s  += tErr3s * tErr3s;
+  errorSqSum10s += tErr10s * tErr10s;
+  errorCount++;
 
+  const avgErr3s   = errorSum3s / errorCount;
+  const avgErr10s  = errorSum10s / errorCount;
+  const curRmse3s  = Math.sqrt(errorSqSum3s / errorCount);
+  const curRmse10s = Math.sqrt(errorSqSum10s / errorCount);
+  rmseSum3s  += curRmse3s;
+  rmseSum10s += curRmse10s;
+  const avgRmse3s  = rmseSum3s / errorCount;
+  const avgRmse10s = rmseSum10s / errorCount;
+
+  // ── KPI: Tracking error (displays 3s and 10s lookahead error) ──
   if (kpiErrorVal) {
-    kpiErrorVal.textContent = `${d.tracking_error_3s.toFixed(2)} / ${d.tracking_error_10s.toFixed(2)}`;
+    kpiErrorVal.textContent = `${tErr3s.toFixed(2)} / ${tErr10s.toFixed(2)}`;
   }
-  if (kpiErrorMaxVal) {
-    kpiErrorMaxVal.textContent = `${maxTrackingError3s.toFixed(2)} / ${maxTrackingError10s.toFixed(2)}`;
+  if (kpiErrorAvgVal) {
+    kpiErrorAvgVal.textContent = `${avgErr3s.toFixed(2)} / ${avgErr10s.toFixed(2)}`;
   }
 
   // ── KPI: Ambient Temp (Replaced MAE) ──
@@ -1272,21 +1286,11 @@ function handleTelemetry(d) {
   }
 
   // ── KPI: RMSE (3s and 10s lookahead) ──
-  const tErr3s  = d.tracking_error_3s;
-  const tErr10s = d.tracking_error_10s;
-  errorSum      += tErr3s;
-  errorSqSum3s  += tErr3s * tErr3s;
-  errorSqSum10s += tErr10s * tErr10s;
-  errorCount++;
-  const curRmse3s  = Math.sqrt(errorSqSum3s / errorCount);
-  const curRmse10s = Math.sqrt(errorSqSum10s / errorCount);
-  if (curRmse3s > maxRmse3s)   maxRmse3s  = curRmse3s;
-  if (curRmse10s > maxRmse10s) maxRmse10s = curRmse10s;
   if (kpiRmseVal) {
     kpiRmseVal.textContent = `${curRmse3s.toFixed(2)} / ${curRmse10s.toFixed(2)}`;
   }
-  if (kpiRmseMaxVal) {
-    kpiRmseMaxVal.textContent = `${maxRmse3s.toFixed(2)} / ${maxRmse10s.toFixed(2)}`;
+  if (kpiRmseAvgVal) {
+    kpiRmseAvgVal.textContent = `${avgRmse3s.toFixed(2)} / ${avgRmse10s.toFixed(2)}`;
   }
 
   // ── KPI: Predicted Temperatures (+3s and +10s) ──
@@ -1538,8 +1542,8 @@ async function doConnect() {
       // Reset session metrics
       pred3sLookaheadBuffer.length = 0;
       pred10sLookaheadBuffer.length = 0;
-      errorSum = errorSqSum3s = errorSqSum10s = errorCount = frameCount = malformedCount = 0;
-      maxRmse3s = maxRmse10s = maxTrackingError3s = maxTrackingError10s = 0;
+      errorSum3s = errorSum10s = errorSqSum3s = errorSqSum10s = errorCount = frameCount = malformedCount = 0;
+      rmseSum3s = rmseSum10s = 0;
       latencySum = latencyCount = 0;
     } else {
       alert(data.error || "Connection failed");
@@ -1634,14 +1638,13 @@ async function resetWholePage() {
 
   // Reset counters & accumulators
   resetTempGlitchFilters();
-  errorSum = 0;
+  errorSum3s = 0;
+  errorSum10s = 0;
   errorSqSum3s = 0;
   errorSqSum10s = 0;
   errorCount = 0;
-  maxRmse3s = 0;
-  maxRmse10s = 0;
-  maxTrackingError3s = 0;
-  maxTrackingError10s = 0;
+  rmseSum3s = 0;
+  rmseSum10s = 0;
   frameCount = 0;
   malformedCount = 0;
   latencySum = 0;
@@ -1654,10 +1657,10 @@ async function resetWholePage() {
 
   // Reset all top row KPI cards
   kpiErrorVal.textContent = "—";
-  if (kpiErrorMaxVal) kpiErrorMaxVal.textContent = "—";
+  if (kpiErrorAvgVal) kpiErrorAvgVal.textContent = "—";
   if (kpiAmbTempVal) kpiAmbTempVal.textContent = "—";
   kpiRmseVal.textContent = "—";
-  if (kpiRmseMaxVal) kpiRmseMaxVal.textContent = "—";
+  if (kpiRmseAvgVal) kpiRmseAvgVal.textContent = "—";
   if (kpiPred3sVal) kpiPred3sVal.textContent = "—";
   if (kpiPred10sVal) kpiPred10sVal.textContent = "—";
   kpiTempVal.textContent = "—";
